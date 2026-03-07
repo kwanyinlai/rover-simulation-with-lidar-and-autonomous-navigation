@@ -36,6 +36,8 @@ void display() {
     // RENDER VISUAL ELEMENTS
     if (is_render_scene) render_wire();
 
+    render_sensor();
+
     sensor_step(&scene, &cloud);
     render_cloud(&cloud);
 

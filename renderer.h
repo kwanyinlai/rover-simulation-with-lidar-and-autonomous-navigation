@@ -5,5 +5,6 @@
 
 void render_wire();
 void render_cloud(PointCloud *cloud);
+void render_sensor();
 
 #endif // RENDERER_H

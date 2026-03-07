@@ -10,6 +10,7 @@
 #include "scene.h"
 #include "renderer.h"
 #include "scene_state.h"
+#include "lidar_sensor.h"
 
 # define MATH_PI 3.14159f
 # define MATH_DEG_TO_RAD (MATH_PI / 180.0f)
@@ -22,10 +23,10 @@ static float cam_target_x = 0.0f;
 static float cam_target_y = 0.0f;
 static float cam_target_z = 0.0f;
 static int prev_x, prev_y, mouse_down = 0;
-static float cam_step = 0.3f;
 // ========================================
 
 int is_render_scene = 1.0;
+
 
 void apply_camera(){
     glMatrixMode(GL_MODELVIEW); 
@@ -40,8 +41,10 @@ void apply_camera(){
 }
 
 void keyboard(unsigned char key, int x, int y) {
+    float cam_step = 0.3f;
+    float sensor_step = .5f;
+    float theta_rad = cam_theta * MATH_DEG_TO_RAD;
     switch (key) {
-        float theta_rad;
         case 27: 
             exit(0); 
         case '=': // + and = occasionally mapped together, check both
@@ -55,24 +58,33 @@ void keyboard(unsigned char key, int x, int y) {
             is_render_scene = !(is_render_scene);
             break;
         case 'w':
-            theta_rad = cam_theta * MATH_DEG_TO_RAD;
             cam_target_x -= sinf(theta_rad) * cam_step;
             cam_target_z -= cosf(theta_rad) * cam_step;
             break;
         case 's':
-            theta_rad = cam_theta * MATH_DEG_TO_RAD;
             cam_target_x += sinf(theta_rad) * cam_step;
             cam_target_z += cosf(theta_rad) * cam_step;
             break;
         case 'a':
-            theta_rad = cam_theta * MATH_DEG_TO_RAD;
             cam_target_x -= cosf(theta_rad) * cam_step;
             cam_target_z += sinf(theta_rad) * cam_step;
             break;
         case 'd':
-            theta_rad = cam_theta * MATH_DEG_TO_RAD;
             cam_target_x += cosf(theta_rad) * cam_step;
             cam_target_z -= sinf(theta_rad) * cam_step;
+            break;
+        case 'i':
+            printf("movement forward should be %f", sinf(theta_rad) * sensor_step);
+            sensor_move(-sinf(theta_rad) * sensor_step, -cosf(theta_rad) * sensor_step);
+            break;
+        case 'k':
+            sensor_move(sinf(theta_rad) * sensor_step, cosf(theta_rad) * sensor_step);
+            break;
+        case 'j':
+            sensor_move(-cosf(theta_rad) * sensor_step, sinf(theta_rad) * sensor_step);
+            break;
+        case 'l':
+            sensor_move(cosf(theta_rad) * sensor_step, -sinf(theta_rad) * sensor_step);
             break;
     }
     glutPostRedisplay();

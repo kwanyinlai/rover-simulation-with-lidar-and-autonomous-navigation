@@ -7,6 +7,7 @@
 #include "scene.h"
 #include "scene_state.h"
 #include "point_cloud.h"
+#include "lidar_sensor.h"
 
 void render_wire(){
     glLineWidth(0.4f);
@@ -35,4 +36,15 @@ void render_cloud(PointCloud *cloud){
         glVertex3f(cloud->data[i].position.x, cloud->data[i].position.y, cloud->data[i].position.z);
     }
     glEnd();
+}
+
+void render_sensor(){
+    Vector3 sensor_pos;
+    get_sensor_pos(&sensor_pos);
+    glPushMatrix();
+    glTranslatef(sensor_pos.x, sensor_pos.y, sensor_pos.z);
+    glColor3f(1.0f, 0.0f, 0.0f); // red for the sensor
+    glutSolidSphere(0.5f, 12, 12);
+    glPopMatrix();
+
 }

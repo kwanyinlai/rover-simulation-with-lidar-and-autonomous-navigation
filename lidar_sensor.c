@@ -9,8 +9,6 @@
 # define MATH_DEG_TO_RAD (MATH_PI / 180.0f)
 
 
-
-
 typedef struct {
     Vector3 origin;
     float theta;
@@ -50,5 +48,16 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud){
 void sensor_step(TriangleArray *scene, PointCloud *point_cloud){
     ss.theta += step;
     cast_all_rays(scene, point_cloud);
+}
+
+void sensor_move(float forward, float side){
+    printf("forward: %f, side: %f\n", forward, side);
+    ss.origin = vector3_add(ss.origin, (Vector3){forward, 0.0f, side});
+    printf("new x: %f, new y: %f, new z: %f\n", ss.origin.x, ss.origin.y, ss.origin.z);
+    fflush(stdout);
+}
+
+void get_sensor_pos(Vector3 *pos){
+    *pos = ss.origin;
 }
 
