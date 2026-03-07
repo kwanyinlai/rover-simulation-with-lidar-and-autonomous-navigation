@@ -13,7 +13,7 @@ endif
 SRCS = main.c
 OBJS = $(BUILD_DIR)/$(SRCS:.c=.o)
 TARGET = $(BUILD_DIR)/lidar
-HEADERS = scene.h vec3.h bvh.h
+HEADERS = scene.h vec3.h camera.h renderer.h scene_state.h
 
 
 all: $(TARGET)
