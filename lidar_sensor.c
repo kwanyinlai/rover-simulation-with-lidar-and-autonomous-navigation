@@ -22,9 +22,8 @@ void init_elevations(){
 }
 
 void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud){
-    Vector3 ray_hits[num_rays];
     for (int i = 0 ; i < num_rays ; i++){
-
+        Vector3 hit;
         // converting theta and elevation to a normalised vector
         float x = cosf(theta) * cosf(elevations[i]); 
         // technically since should be MATH_PI / 2 - polar, but equivalent to converting 
@@ -32,7 +31,8 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud){
         float y = sinf(elevations[i]);
         float z = sinf(theta) * cosf(elevations[i]);
     
-        cast_ray(scene, &origin, (Vector3){x, y, z}, ray_hits + i, point_cloud);
+        float dist = cast_ray(scene, &origin, (Vector3){x, y, z}, &hit);
+        if (dist > 0) point_cloud_push_back(point_cloud, hit, dist);
     }
 }
 
