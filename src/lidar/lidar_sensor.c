@@ -8,7 +8,6 @@
 # include "lidar/sensor_control.h"
 
 
-
 # define MAX_SPEED 5.0f
 # define MAX_ANGULAR_SPEED (120.0f * MATH_DEG_TO_RAD)
 # define ACCELERATION 3.0f
@@ -32,7 +31,6 @@ static float gaussian_noise() {
     return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.14159f * u2);
     // TODO: hard coded PI, if needed more, then define a constant for it.
 }
-
 
 void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map){
     const float noise_factor = 0.01f; // realistic noise strength (2% of distance)

@@ -143,14 +143,16 @@ void render_sensor(){
     Vector3 arrow_dir = {cosf(dir_angle), 0.0f, sinf(dir_angle)};
     Vector3 arrow_end = vector3_add(sensor_pos, vector3_scale(arrow_dir, arrow_length));
 
-    glColor3f(0.f, 1.0f, 1.0f);
-    glLineWidth(3.0f);
+    glColor3f(1.0f, 1.0f, 1.0f);
     glBegin(GL_LINES);
+
+    // arrow shaft
+
     glVertex3f(sensor_pos.x, sensor_pos.y, sensor_pos.z);
     glVertex3f(arrow_end.x, arrow_end.y, arrow_end.z);
-    glEnd();
 
-    // Arrowhead
+
+    // arrow head
     float head_size = 0.3f;
     float head_angle = 0.5f; // radians
     float left_angle = dir_angle + M_PI - head_angle;
@@ -165,7 +167,8 @@ void render_sensor(){
         arrow_end.y,
         arrow_end.z + head_size * sinf(right_angle)
     };
-    glBegin(GL_LINES);
+
+    
     glVertex3f(arrow_end.x, arrow_end.y, arrow_end.z);
     glVertex3f(left_head.x, left_head.y, left_head.z);
     glVertex3f(arrow_end.x, arrow_end.y, arrow_end.z);

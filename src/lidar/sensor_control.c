@@ -65,7 +65,8 @@ float get_sensor_velocity() {
 
 void rover_control(float dt){
     // simple physics for smooth acceleration and turning
-    printf("Throttle: %.2f, Steer: %.2f\n", throttle, steer);
+    // printf("Throttle: %.2f, Steer: %.2f\n", throttle, steer);
+
     if (throttle != 0) {
         ss.speed += throttle * ACCELERATION * dt;
         ss.speed = fmaxf(-MAX_SPEED, fminf(MAX_SPEED, ss.speed));

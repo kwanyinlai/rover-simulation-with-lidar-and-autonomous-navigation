@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
     glutMotionFunc(mouse_move);
 
     printf("mouse drag to orbit, +/- to zoom\n");
+    printf("WASD to drive, P to pause, F to toggle frontier visualization, T to toggle environment\n");
     glutShowWindow();
     glutMainLoop();
     return 0;
