@@ -14,19 +14,19 @@
  * @brief Single point entry in the point cloud.
  */
 typedef struct {
-    Vector3 position;   /**< 3D position of the point. */
-    float distance;     /**< Distance from sensor. */
-    float intensity;    /**< Surface intensity at hit. */
-    float age;          /**< Age of the point (for fading/cleanup). */
+    Vector3 position;
+    float distance;
+    float intensity;
+    float age;
 } PointCloudEntry;
 
 /**
  * @brief Container for dynamic point cloud data.
  */
 typedef struct {
-    PointCloudEntry *data; /**< Array of point entries. */
-    size_t size;           /**< Number of points in the cloud. */
-    size_t capacity;       /**< Allocated capacity. */
+    PointCloudEntry *data;
+    size_t size;
+    size_t capacity;
 } PointCloud;
 
 /**

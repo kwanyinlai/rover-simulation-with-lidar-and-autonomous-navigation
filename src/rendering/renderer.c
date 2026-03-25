@@ -3,6 +3,7 @@
 #else
 #  include <GL/glut.h>
 #endif
+
 #include "rendering/vec3.h"
 #include "rendering/scene.h"
 #include "rendering/scene_state.h"
@@ -60,31 +61,49 @@ void render_cloud(PointCloud *cloud, float dt){
 }
 
 void render_occupancy_map(const OccupancyMap *map){
-    printf("Rendering occupancy map...\n");
+    glBegin(GL_LINES);
     for (int z = 0; z < map->depth; z++)
     for (int y = 0; y < map->height; y++)
     for (int x = 0; x < map->width; x++) {
         CELL_STATE state = occupancy_map_get_cell(map, x, y, z);
         if (state == OCCUPIED){
-            float confidence = fminf(1.0f, occupancy_map_get_cell(map, x, y, z) / 0.4f); // confidence based on log-odds value
+            float log_odds = occupancy_map_get_log_odds(map, x, y, z);
+            float confidence = fminf(1.0f, log_odds / 5.0f) * 0.5f;
+            glColor4f(confidence, 0.0f, 0.0f, 0.5f);
             float r = 1.0f, g = 0.0f, b = 0.0f; // red for occupied
-            glColor3f(r * confidence, g * confidence, b * confidence);
+            glColor4f(r * confidence, g * confidence, b * confidence, 0.5f);
             
         }
         else if (state == FREE && is_frontier_point(map, x, y, z)){
-            float r = 0.0f, g = 1.0f, b = 0.0f; // green for frontier
-            glColor3f(r, g, b);
+            float r = 0.80f, g = 0.80f, b = 0.80f; // green for frontier
+            glColor4f(r, g, b, 0.1f);
         }
         else continue; // skip free and unknown cells
         
-        float cell_x = map->origin.x + x * map->cell_size + map->cell_size / 2;
-        float cell_y = map->origin.y + y * map->cell_size + map->cell_size / 2;
-        float cell_z = map->origin.z + z * map->cell_size + map->cell_size / 2;
-        glPushMatrix();
-        glTranslatef(cell_x, cell_y, cell_z);
-        glutSolidCube(map->cell_size * 0.9f);
-        glPopMatrix();
+        float cx = map->origin.x + (x + 0.5f) * map->cell_size;
+        float cy = map->origin.y + (y + 0.5f) * map->cell_size;
+        float cz = map->origin.z + (z + 0.5f) * map->cell_size;
+        float h = map->cell_size * 0.45f; // half extent
+
+
+        // 12 edges of a cube, each as a line segment
+        // bottom face
+        glVertex3f(cx-h,cy-h,cz-h); glVertex3f(cx+h,cy-h,cz-h);
+        glVertex3f(cx+h,cy-h,cz-h); glVertex3f(cx+h,cy-h,cz+h);
+        glVertex3f(cx+h,cy-h,cz+h); glVertex3f(cx-h,cy-h,cz+h);
+        glVertex3f(cx-h,cy-h,cz+h); glVertex3f(cx-h,cy-h,cz-h);
+        // top face
+        glVertex3f(cx-h,cy+h,cz-h); glVertex3f(cx+h,cy+h,cz-h);
+        glVertex3f(cx+h,cy+h,cz-h); glVertex3f(cx+h,cy+h,cz+h);
+        glVertex3f(cx+h,cy+h,cz+h); glVertex3f(cx-h,cy+h,cz+h);
+        glVertex3f(cx-h,cy+h,cz+h); glVertex3f(cx-h,cy+h,cz-h);
+        // verticals
+        glVertex3f(cx-h,cy-h,cz-h); glVertex3f(cx-h,cy+h,cz-h);
+        glVertex3f(cx+h,cy-h,cz-h); glVertex3f(cx+h,cy+h,cz-h);
+        glVertex3f(cx+h,cy-h,cz+h); glVertex3f(cx+h,cy+h,cz+h);
+        glVertex3f(cx-h,cy-h,cz+h); glVertex3f(cx-h,cy+h,cz+h);
     }
+    glEnd();
 
 }
 

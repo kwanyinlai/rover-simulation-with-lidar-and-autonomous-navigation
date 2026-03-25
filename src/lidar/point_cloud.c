@@ -22,6 +22,7 @@ void point_cloud_push_back(PointCloud *pc, Vector3 pos, float dist, float intens
     pc->data[pc->size++] = new_entry;
 }
 
+
 void point_cloud_free(PointCloud *pc) {
     free(pc->data);
     pc->data = NULL;

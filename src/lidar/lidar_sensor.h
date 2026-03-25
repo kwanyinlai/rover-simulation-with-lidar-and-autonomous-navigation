@@ -10,8 +10,12 @@
 #ifndef LIDAR_SENSOR_H
 #define LIDAR_SENSOR_H
 
+
+# define NUM_RINGS 256
+
 #include "rendering/scene.h"
 #include "lidar/point_cloud.h"
+#include "lidar/occupancy_map.h"
 
 /**
  * @brief Initialize the internal state of the lidar sensor.
@@ -22,8 +26,9 @@ void init_sensor_state();
  * @brief Advance the sensor simulation by one step and collect point cloud data.
  * @param scene Pointer to the scene geometry.
  * @param point_cloud Output point cloud to store detected points.
+ * @param map Pointer to the occupancy map.
  */
-void sensor_step(const TriangleArray *scene, PointCloud *point_cloud);
+void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map);
 
 /**
  * @brief Move the sensor in the scene.

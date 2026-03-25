@@ -16,9 +16,9 @@
  * @brief 3D vector structure.
  */
 typedef struct {
-    float x; /**< X coordinate. */
-    float y; /**< Y coordinate. */
-    float z; /**< Z coordinate. */
+    float x;
+    float y;
+    float z;
 } Vector3;
 
 /**

@@ -31,5 +31,6 @@ int occupancy_map_get_frontier(const OccupancyMap *map, Vector3 *out_pos, int ma
 
 int is_frontier_point(const OccupancyMap *map, int x, int y, int z);
 
+float occupancy_map_get_log_odds(const OccupancyMap *map, int x, int y, int z);
 
 #endif

@@ -25,8 +25,9 @@ PointCloud cloud;
 OccupancyMap map;
 
 static float last_time = 0.0f;
-
 extern int is_render_scene;
+extern int is_paused;
+extern int toggle_frontiers;
 
 void display() {
     float current_time = glutGet(GLUT_ELAPSED_TIME) / 1000.0f; 
@@ -44,10 +45,12 @@ void display() {
 
     render_sensor();
 
-    sensor_step(&scene, &cloud, &map);
+    if (!is_paused) {
+        sensor_step(&scene, &cloud, &map);
+    }
     glDepthMask(GL_FALSE);
     render_cloud(&cloud, delta_time);
-    render_occupancy_map(&map);
+    toggle_frontiers ? render_occupancy_map(&map) : (void)0;
     glDepthMask(GL_TRUE);
 
     // SWAP BUFFERS
@@ -70,6 +73,7 @@ int main(int argc, char** argv) {
     build_scene(&scene);
     init_occupancy_map(&map, 300, 60, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
     // x from -15 to 15, y from 0 to 6, z from -12 to 12, with 0.1m resolution, gives us a 300x60x240 grid
+    printf("Scene and sensor initialized. Starting main loop...\n");
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(768, 768);
@@ -87,7 +91,7 @@ int main(int argc, char** argv) {
     glutMotionFunc(mouse_move);
 
     printf("mouse drag to orbit, +/- to zoom\n");
-
+    glutShowWindow();
     glutMainLoop();
     return 0;
 }

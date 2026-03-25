@@ -10,6 +10,7 @@
 
 
 
+
 // Generate a standard normal (mean=0, stddev=1) random value using the Box-Muller transform.
 // @see https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
 static float gaussian_noise() {
@@ -19,10 +20,10 @@ static float gaussian_noise() {
     // TODO: hard coded PI, if needed more, then define a constant for it.
 }
 
-#define NUM_RINGS 1024
+# define NUM_RINGS 256
 # define MATH_PI 3.14159f
 # define MATH_DEG_TO_RAD (MATH_PI / 180.0f)
-
+# define MAX_RANGE 30.f
 
 typedef struct {
     Vector3 origin;
@@ -37,8 +38,8 @@ static float step = 0.01f;
 
 
 void init_sensor_state(){
-    ss.min_elev_angle = -80.f * MATH_DEG_TO_RAD;
-    ss.max_elev_angle = 80.f * MATH_DEG_TO_RAD;
+    ss.min_elev_angle = -30.f * MATH_DEG_TO_RAD;
+    ss.max_elev_angle = 89.f * MATH_DEG_TO_RAD;
     ss.origin = (Vector3){0.0f, 3.0f, 0.0f};
     for (int i = 0 ; i < NUM_RINGS ; i++){
         ss.elevations[i] = ss.min_elev_angle +
@@ -59,7 +60,16 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
         Vector3 dir = {x, y, z};
         float intensity;
         float dist = cast_ray(scene, &(ss.origin), dir, &hit, &intensity);
-        occupancy_map_ray_cast(map, ss.origin, hit, dist > 0.0f);
+        if (dist > 0.0f) {
+            occupancy_map_ray_cast(map, ss.origin, hit, 1);
+        } else {
+            Vector3 max_range_point = {
+                ss.origin.x + dir.x * MAX_RANGE,
+                ss.origin.y + dir.y * MAX_RANGE,
+                ss.origin.z + dir.z * MAX_RANGE
+            };
+            occupancy_map_ray_cast(map, ss.origin, max_range_point, 0);
+        }
         if (dist > 0) {
             float noise = gaussian_noise();
             float noisy_dist = fmax(dist + noise * (noise_factor * dist), 0.01f); // clamp to avoid negative or zero distance

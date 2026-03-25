@@ -36,6 +36,8 @@ static int prev_pan_x, prev_pan_y;
 // ========================================
 
 int is_render_scene = 1;
+int is_paused = 0;
+int toggle_frontiers = 0;
 
 void apply_camera() {
     glMatrixMode(GL_MODELVIEW);
@@ -55,6 +57,7 @@ void keyboard(unsigned char key, int x, int y) {
         case 27:
             exit(0);
         case 't':
+        case 'T':
             is_render_scene = !is_render_scene;
             break;
         case '=': // '=' is sometimes reported as '=' apparently, so we check for both
@@ -65,6 +68,14 @@ void keyboard(unsigned char key, int x, int y) {
         case '-':
             cam_dist += cam_dist * CAMERA_PAN_SENSITIVITY;
             cam_dist = fminf(cam_dist, CAM_MAX_ZOOM); // prevent zooming out too much
+            break;
+        case 'p':
+        case 'P':
+            is_paused = !is_paused;
+            break;
+        case 'f':
+        case 'F':
+            toggle_frontiers = !toggle_frontiers;
             break;
     }
     glutPostRedisplay();
