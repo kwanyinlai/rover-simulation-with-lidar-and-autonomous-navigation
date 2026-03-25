@@ -1,19 +1,29 @@
-# ifndef VEC3_H
-# define VEC3_H
+/**
+ * @file vec3.h
+ * @brief 3D vector operations and data structure.
+ *
+ * Provides a simple 3D vector struct and basic vector math utilities for geometry and rendering.
+ */
+
+#ifndef VEC3_H
+#define VEC3_H
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
-/* 
-This file contains the implementation of basic vector operations for 3D vectors.
-*/
+/**
+ * @brief 3D vector structure.
+ */
 typedef struct {
-    float x;
-    float y;
-    float z;
+    float x; /**< X coordinate. */
+    float y; /**< Y coordinate. */
+    float z; /**< Z coordinate. */
 } Vector3;
 
+/**
+ * @brief Add two vectors.
+ */
 static inline Vector3 vector3_add(Vector3 a, Vector3 b) {
     Vector3 result;
     result.x = a.x + b.x;
@@ -22,6 +32,9 @@ static inline Vector3 vector3_add(Vector3 a, Vector3 b) {
     return result;
 }
 
+/**
+ * @brief Subtract vector b from a.
+ */
 static inline Vector3 vector3_subtract(Vector3 a, Vector3 b) {
     Vector3 result;
     result.x = a.x - b.x;
@@ -30,6 +43,9 @@ static inline Vector3 vector3_subtract(Vector3 a, Vector3 b) {
     return result;
 }
 
+/**
+ * @brief Scale a vector by a scalar.
+ */
 static inline Vector3 vector3_scale(Vector3 v, float scalar) {
     Vector3 result;
     result.x = v.x * scalar;

@@ -1,5 +1,5 @@
-#include "scene.h"
-#include "vec3.h"
+#include "rendering/scene.h"
+#include "rendering/vec3.h"
 
 #define INIT_SIZE 32
 
@@ -108,12 +108,10 @@ void mesh_add_box(TriangleArray *scene, float centre_x, float centre_y, float ce
     );
 }
 
-void build_scene(TriangleArray *scene) {
+// ======================================
+
+void build_floor(TriangleArray *scene){
     int div_floor = 20; // floor tesselation
-    int div_walls = 8;  // walls tesselation
-
-
-    // Floor
     mesh_add_quad_tesselated(
         scene,
         (Vector3){-25.f, 0.f, -25.f},
@@ -122,6 +120,25 @@ void build_scene(TriangleArray *scene) {
         (Vector3){-25.f, 0.f, 25.f},
         div_floor
     );
+}
+
+void height_map(TriangleArray *scene, int min_x, int max_x, int min_z, int max_z, int grid_resolution){
+    float height_map[grid_resolution][grid_resolution];
+    
+}
+
+
+
+
+// ======================================
+
+
+void build_scene(TriangleArray *scene) {
+    int div_walls = 8;  // walls tesselation
+
+
+    // Floor
+    build_floor(scene);
 
     // Back wall
     mesh_add_quad_tesselated(
@@ -159,5 +176,5 @@ void build_scene(TriangleArray *scene) {
     mesh_add_box(scene, 0.5f, 0.0f, 5.0f, 2.0f, 0.5f, 0.8f);
     mesh_add_box(scene, -7.0f,0, -3.0f, 1.0f, 1.2f, 1.0f);
 
-    printf("%d triangles\n", scene->size);
+    printf("%zu triangles\n", scene->size);
 }

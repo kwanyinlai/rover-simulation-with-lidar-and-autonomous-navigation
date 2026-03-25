@@ -1,15 +1,26 @@
+
+/**
+ * @file scene.h
+ * @brief Scene geometry definitions and utilities.
+ *
+ * Provides data structures and functions for representing and manipulating 3D scene geometry.
+ */
+
 #ifndef SCENE_H
 #define SCENE_H
 
-#include "vec3.h"
+#include "rendering/vec3.h"
 
-/* 
-Scene definition. This file contains the definition of the scene geometry.
-*/
+/**
+ * @brief Triangle primitive for scene geometry.
+ */
 typedef struct {
     Vector3 v0, v1, v2;
 } Triangle;
 
+/**
+ * @brief Dynamic array of triangles representing the scene.
+ */
 typedef struct {
     Triangle *data;
     size_t size;

@@ -1,12 +1,9 @@
-#include "vec3.h"
-#include "scene.h"
+#include "rendering/vec3.h"
+#include "rendering/scene.h"
 
 
-/*
-https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
-
-returns returns t > 0 on hit, -1.0f on miss
-*/
+// Möller–Trumbore intersection algorithm. Returns t > 0 on hit, -1.0f on miss.
+// @see https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
 float scene_triangle_query(const Triangle *triangle, const Vector3 *origin, const Vector3 dir, 
     Vector3 *hit){
     
@@ -14,8 +11,6 @@ float scene_triangle_query(const Triangle *triangle, const Vector3 *origin, cons
 
     Vector3 edge1 = vector3_subtract(triangle->v1, triangle->v0);
     Vector3 edge2 = vector3_subtract(triangle->v2, triangle->v0);
-
-
 
     Vector3 ray_cross_e2 = vector3_cross(dir, edge2);
     float det = vector3_dot(edge1, ray_cross_e2);
@@ -45,9 +40,7 @@ float scene_triangle_query(const Triangle *triangle, const Vector3 *origin, cons
     return -1.0f;
 }
 
-/* call Möller–Trumbore on all triangles in scene
-   Modifies Vector3 *hit
-*/
+// Cast a ray into the scene and find the closest intersection.
 float cast_ray(const TriangleArray *scene, const Vector3 *origin, const Vector3 dir, 
     Vector3 *hit, float *intensity){
     const Triangle *best_triangle = NULL;
