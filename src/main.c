@@ -12,7 +12,7 @@
 
 #include <stdio.h>
 # include <unistd.h>
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 #include "rendering/scene.h"
 #include "rendering/scene_state.h"
 #include "rendering/camera.h"
@@ -22,7 +22,7 @@
 #include "lidar/point_cloud.h"
 #include "lidar/occupancy_map.h"
 #include "piping/method_dispatcher.h"
-
+#include "lidar/rover_controller.h"
 
 
 TriangleArray scene;
@@ -33,12 +33,15 @@ static float last_time = 0.0f;
 extern int is_render_scene;
 extern int is_paused;
 extern int toggle_frontiers;
+extern RoverMode rover_mode;
 
-// Store child PIDs for cleanup
+
 #include <signal.h>
 #include <sys/wait.h>
 
+// signal handler for clean handling of forked processes
 int g_coord_pid = -1;
+int updated_voxels_pipe_rd = -1; // pipe for receiving updated voxels from occupancy updater process
 
 static void sigterm_handler(int sig) { exit(0); }
 
@@ -50,6 +53,7 @@ void handle_sigint(int sig) {
     exit(0);
 }
 
+// store worker ids to kill before terminating coordinator
 static int worker_pids[NUM_WORKERS] = {0};
 static void coordinator_sigterm(int sig) {
     for (int i = 0; i < NUM_WORKERS; i++) {
@@ -62,28 +66,37 @@ static void coordinator_sigterm(int sig) {
 }
 
 void create_workers(){
+
+    signal(SIGTERM, sigterm_handler); 
+
     int scan_cmd_pipe[2];
     int point_batch_pipe[2];
     int ray_batch_results_pipe[2];    
-    signal(SIGTERM, sigterm_handler); 
+    int updated_voxels_pipe[2];
 
 
     pipe(ray_batch_results_pipe);
     pipe(scan_cmd_pipe);
     pipe(point_batch_pipe);
-
+    pipe(updated_voxels_pipe);
 
     g_coord_pid = fork();
     if (g_coord_pid < 0) {
-        fprintf(stderr, "Failed to fork process\n");
+        perror("Failed to fork process");
         exit(1);
     }
     else if (g_coord_pid == 0) {
         // scan coordinator
-        signal(SIGTERM, coordinator_sigterm); // Ensure child processes can exit cleanly on SIGTERM
 
-        close(scan_cmd_pipe[1]); // close write end
+        signal(SIGTERM, coordinator_sigterm); 
+
+        // receive scan commands from main process
+        close(scan_cmd_pipe[1]); // close write end of scan cmd 
+        // coordinator will write point batches to occupancy updater
         close(point_batch_pipe[0]); // close read end
+        // unused updated voxel pipes for occupancy manager
+        close(updated_voxels_pipe[0]); 
+        close(updated_voxels_pipe[1]);  
 
         int ray_task_pipe[NUM_WORKERS][2];
         int ray_results_pipe[NUM_WORKERS][2];
@@ -93,12 +106,13 @@ void create_workers(){
             int wpid = fork();
             if (wpid == 0) {
                 signal(SIGTERM, sigterm_handler); 
-                // exit
+                // additionally close scan_cmd read
                 close(scan_cmd_pipe[0]);
+                // additionally close write end of ray batch results
                 close(point_batch_pipe[1]);
-                close(ray_batch_results_pipe[1]);
+                // additionally close read end of ray batch results
+                close(ray_batch_results_pipe[0]);
     
-
                 // worker process
                 for (int j = 0; j < NUM_WORKERS; j++) {
                     if (j != i) {
@@ -115,13 +129,15 @@ void create_workers(){
                     }
                 }
                 run_worker_loop(ray_task_pipe[i][0], ray_results_pipe[i][1], &scene);
+                exit(0);
             } else {
-                // In coordinator, record worker PID for cleanup
+                // record worker_pids for cleanup
                 worker_pids[i] = wpid;
             }
         }
 
         run_coordinator_loop(scan_cmd_pipe[0], ray_batch_results_pipe[1], ray_task_pipe, ray_results_pipe, point_batch_pipe[1]);
+        exit(0);
     }
 
     int updater_pid = fork();
@@ -133,16 +149,18 @@ void create_workers(){
         // occupancy updater
         close(scan_cmd_pipe[0]); // close read end
         close(point_batch_pipe[1]); // close write end
-        run_occupancy_updater_loop(point_batch_pipe[0], &map);
-        // exit(0);
+        close(updated_voxels_pipe[0]); // close read end
+        run_occupancy_updater_loop(point_batch_pipe[0], updated_voxels_pipe[1], &map);
+        exit(0);
         // run occupancy updater loop
-        run_occupancy_updater_loop(point_batch_pipe[0], &map);
     }
     close(scan_cmd_pipe[0]);
     close(point_batch_pipe[0]);
     close(point_batch_pipe[1]);
     close(ray_batch_results_pipe[1]);
+    close(updated_voxels_pipe[1]);
 
+    updated_voxels_pipe_rd = updated_voxels_pipe[0]; // store read end for main loop to read updated voxels from occupancy updater
     g_scan_cmd_fd = scan_cmd_pipe[1]; // extern'ed in lidar_sensor.h, used in lidar_sensor.c to send scan commands to coordinator
     g_ray_batch_results_fd = ray_batch_results_pipe[0]; // extern'ed in lidar_sensor.h, used in lidar_sensor.c to receive ray results from coordinator
 }
@@ -159,20 +177,61 @@ void display() {
     apply_camera();
 
     // MOVE ROVER
+    if (rover_mode == MODE_AUTO) {
+        update_path_follower(delta_time);
+    }
+    
+    update_odometry(delta_time);
     rover_control(delta_time);
+    
+    render_predicted_path();
+    render_pose_error();
 
     // RENDER VISUAL ELEMENTS
     if (is_render_scene) render_wire();
 
     render_sensor();
 
+    // move sensor 
     if (!is_paused) {
         sensor_step(&scene, &cloud, &map);
     }
+
+    // read from updated voxels pipe and update occupancy map
+    // TODO: only reading for now to unblock
+    if (updated_voxels_pipe_rd != -1){
+        fd_set updated_voxels_set;
+        FD_ZERO(&updated_voxels_set);
+        FD_SET(updated_voxels_pipe_rd, &updated_voxels_set);
+        struct timeval timeout = {0, 0}; // non-blocking
+        int ret = select(updated_voxels_pipe_rd + 1, &updated_voxels_set, NULL, NULL, &timeout);
+        while (ret > 0 && FD_ISSET(updated_voxels_pipe_rd, &updated_voxels_set)) {
+            int count = 0;
+            read(updated_voxels_pipe_rd, &count, sizeof(int));
+            VoxelUpdate updates[count];
+            if (read(updated_voxels_pipe_rd, &updates, sizeof(VoxelUpdate) * count) == -1) {
+                perror("read");
+                exit(1);
+            }
+            else {
+                // update_projected_frontiers(&map, updates, count);
+            }
+
+            FD_ZERO(&updated_voxels_set);
+            FD_SET(updated_voxels_pipe_rd, &updated_voxels_set);
+            // keep looping until we clear out the pipe
+            ret = select(updated_voxels_pipe_rd + 1, &updated_voxels_set, NULL, NULL, &timeout);
+        }   
+    }
+
+    // point cloud render
     glDepthMask(GL_FALSE);
     render_cloud(&cloud, delta_time);
-    toggle_frontiers ? render_occupancy_map(&map) : (void)0;
+    if (toggle_frontiers) {
+        render_occupancy_map(&map);
+    }
     glDepthMask(GL_TRUE);
+
 
     // SWAP BUFFERS
     glutSwapBuffers();
@@ -192,6 +251,15 @@ int main(int argc, char** argv) {
     signal(SIGINT, handle_sigint);
     signal(SIGTERM, handle_sigint);
     init_sensor_state();
+    init_rover_controller();
+    Waypoint square[] = {
+        {5.0f,  0.0f},
+        {5.0f,  5.0f},
+        {0.0f,  5.0f},
+        {0.0f,  0.0f}
+    };
+    set_waypoints(square, 4);
+
     init_point_cloud(&cloud);
     triangle_array_init(&scene);
     build_scene(&scene);
@@ -203,6 +271,7 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(768, 768);
     glutCreateWindow("LIDAR Simulator");
+
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);

@@ -9,7 +9,7 @@
 #ifndef SCENE_H
 #define SCENE_H
 
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 
 /**
  * @brief Triangle primitive for scene geometry.

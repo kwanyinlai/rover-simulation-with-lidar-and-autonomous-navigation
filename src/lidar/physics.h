@@ -1,0 +1,10 @@
+# define MAX_SPEED 2.0f
+# define MAX_ANGULAR_SPEED (130.0f * MATH_DEG_TO_RAD)
+# define ACCELERATION 1.0f
+# define ANGULAR_ACCELERATION (180.0f * MATH_DEG_TO_RAD)
+# define FRICTION 2.f
+# define ANGULAR_FRICTION (150.0f * MATH_DEG_TO_RAD)
+# define MATH_DEG_TO_RAD (M_PI / 180.0f)
+
+
+

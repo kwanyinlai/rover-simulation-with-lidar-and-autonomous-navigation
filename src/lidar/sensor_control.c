@@ -1,5 +1,5 @@
 
-# include "rendering/vec3.h"
+# include "core/vec3.h"
 # include "lidar/raycaster.h"
 # include <math.h>
 # include <stdlib.h>
@@ -7,20 +7,9 @@
 # include "lidar/occupancy_map.h"
 # include "lidar/lidar_sensor.h"
 
+# include "lidar/physics.h"
 
-# define MAX_SPEED 5.0f
-# define MAX_ANGULAR_SPEED (120.0f * MATH_DEG_TO_RAD)
-# define ACCELERATION 3.0f
-# define ANGULAR_ACCELERATION (150.0f * MATH_DEG_TO_RAD)
-# define FRICTION 2.f
-# define ANGULAR_FRICTION (130.0f * MATH_DEG_TO_RAD)
 
-typedef struct {
-    Vector3 origin;
-    float speed;
-    float angular_speed;
-    float dir_angle;
-} SensorState;
 
 static SensorState ss;
 
@@ -29,7 +18,7 @@ static float steer; // -1, 0 or 1, for left and right'
 
 void init_sensor_state(){
    
-    ss.origin = (Vector3){0.0f, 3.0f, 0.0f};
+    ss.origin = (Vector3){0.0f, 1.0f, 0.0f};
 
     ss.speed = 0.0f;
     ss.angular_speed = 0.0f;
@@ -53,6 +42,10 @@ float get_throttle(){
 
 void set_steer(float value){
     steer = fmaxf(-1.0f, fminf(1.0f, value));
+}
+
+float get_steer(){
+    return steer;
 }
 
 float get_sensor_dir_angle() {
@@ -94,6 +87,10 @@ void rover_control(float dt){
     
     // ss.dir_angle += ss.angular_speed * dt; // TODO: rotate lidar as well? maybe we don't want this though
     // // even if it is more physically acurate
+}
+
+const SensorState *get_sensor_state(void) {
+    return &ss;
 }
 
 

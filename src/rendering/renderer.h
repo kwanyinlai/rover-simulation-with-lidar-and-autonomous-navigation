@@ -30,4 +30,5 @@ void render_occupancy_map(const OccupancyMap *map);
  */
 void render_sensor();
 
+
 #endif // RENDERER_H

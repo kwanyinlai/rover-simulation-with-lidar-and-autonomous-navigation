@@ -1,18 +1,29 @@
-#ifdef __APPLE__
-#  include <GLUT/glut.h>
-#else
-#  include <GL/glut.h>
-#endif
-
-#include "rendering/vec3.h"
-#include "rendering/scene.h"
-#include "rendering/scene_state.h"
-#include "lidar/point_cloud.h"
-#include "lidar/sensor_control.h"
-#include "lidar/occupancy_map.h"
 
 
-#define DECAY_RATE 0.50f
+# ifdef __APPLE__
+#   include <OpenGL/gl3.h>
+#   include <GLUT/glut.h>
+# else
+#   include <GL/glew.h>
+#   include <GL/glut.h>
+# endif
+
+# include "core/vec3.h"
+# include "rendering/scene.h"
+# include "rendering/scene_state.h"
+# include "lidar/point_cloud.h"
+# include "lidar/sensor_control.h"
+# include "lidar/occupancy_map.h"
+# include <string.h>
+
+
+
+# define DECAY_RATE 0.50f
+
+# define VERTICES_PER_VOXEL 24 // 12 edges * 2 vertices per edge
+# define FLOATS_PER_VERTEX 7 // x, y, z, r, g, b, alpha
+
+# define MAX_VISIBLE_VOXELS 1000000
 
 void render_wire(){
     glLineWidth(0.4f);
@@ -144,10 +155,10 @@ void render_sensor(){
     Vector3 arrow_end = vector3_add(sensor_pos, vector3_scale(arrow_dir, arrow_length));
 
     glColor3f(1.0f, 1.0f, 1.0f);
+    glLineWidth(3.0f);
     glBegin(GL_LINES);
 
     // arrow shaft
-
     glVertex3f(sensor_pos.x, sensor_pos.y, sensor_pos.z);
     glVertex3f(arrow_end.x, arrow_end.y, arrow_end.z);
 
@@ -177,5 +188,6 @@ void render_sensor(){
     glLineWidth(1.0f);
 
 }
+
 
 

@@ -9,7 +9,7 @@
 #ifndef RAYCASTER_H
 #define RAYCASTER_H
 
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 #include "rendering/scene.h"
 #include "lidar/point_cloud.h"
 

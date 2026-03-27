@@ -5,14 +5,14 @@
 #endif
 
 #include <math.h>
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 #include "rendering/scene.h"
 #include "rendering/renderer.h"
 #include "rendering/scene_state.h"
 #include "lidar/sensor_control.h"
 
-#define MATH_PI 3.14159f
-#define MATH_DEG_TO_RAD (MATH_PI / 180.0f)
+
+#define MATH_DEG_TO_RAD (M_PI / 180.0f)
 #define CAMERA_MIN_PHI 2.f
 #define CAMERA_MAX_PHI 89.f
 #define CAMERA_ROTATE_SENSITIVITY 0.5f

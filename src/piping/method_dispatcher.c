@@ -5,29 +5,40 @@
 # include "lidar/raycaster.h"
 # include "lidar/sensor_control.h"
 # include <unistd.h>
+# include "core/noise.h"
 
 
-
-
-void run_occupancy_updater_loop(int read_fd, OccupancyMap* map){
+void run_occupancy_updater_loop(int read_fd, int write_fd, OccupancyMap* map){
     RayResultBatch ray_result_batch;
     while (read(read_fd, &ray_result_batch, sizeof(RayResultBatch)) > 0) {
+        MapDelta map_delta = {.count = 0};
         for (int i = 0; i < ray_result_batch.count; i++) {
             RayResult *r = &ray_result_batch.rays[i];
             Vector3 dir = vector3_normalize(vector3_subtract(r->hit, ray_result_batch.origin));
-
             if (r->distance > 0.0f) {
-                occupancy_map_ray_cast(map, ray_result_batch.origin, r->hit, 1);
+                occupancy_map_ray_cast(map, ray_result_batch.origin, r->hit, 1, &map_delta);
             } else {
+                
                 Vector3 max_range_point = {
                     ray_result_batch.origin.x + dir.x * MAX_RANGE,
                     ray_result_batch.origin.y + dir.y * MAX_RANGE,
                     ray_result_batch.origin.z + dir.z * MAX_RANGE
                 };
-                occupancy_map_ray_cast(map, ray_result_batch.origin, max_range_point, 0);
+                occupancy_map_ray_cast(map, ray_result_batch.origin, max_range_point, 0, &map_delta);
+            }
+            // flush out buffer early if we overflow to avoid large memory usage spikes
+            if (map_delta.count >= MAX_UPDATED_VOXELS){
+                write(write_fd, &(map_delta.count), sizeof(int));
+                write(write_fd, &(map_delta.updates), sizeof(VoxelUpdate) * map_delta.count);
+                map_delta.count = 0;
             }
         }
-        // potentially write frontier updates elsewhere
+
+        if (map_delta.count > 0){
+            write(write_fd, &(map_delta.count), sizeof(int));
+            write(write_fd, &(map_delta.updates), sizeof(VoxelUpdate) * map_delta.count);
+            map_delta.count = 0;
+        }
     }
     
 
@@ -62,6 +73,17 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray* scene){
                     .distance = noisy_dist,
                     .intensity = intensity,
                     .hit = noisy_pos
+                };
+            }
+            else{
+                ray_result_batch.rays[ray_result_batch.count++] = (RayResult){
+                    .distance = -1.0f,
+                    .intensity = 0.0f,
+                    .hit = {
+                        origin.x + dir.x,
+                        origin.y + dir.y,
+                        origin.z + dir.z
+                    }
                 };
             }
         }

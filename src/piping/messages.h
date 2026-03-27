@@ -2,11 +2,18 @@
 #ifndef MESSAGES_H
 #define MESSAGES_H
 
+# include "core/vec3.h"
 
-# include "rendering/vec3.h"
-# include "piping/method_dispatcher.h"
-# include "lidar/sensor_control.h"
 
+# define MAX_UPDATED_VOXELS 4028
+# define NUM_WORKERS 4
+# define NUM_RINGS 256
+
+typedef enum {
+    UNKNOWN = 0,
+    FREE = 1,
+    OCCUPIED = 2
+} CELL_STATE;
 typedef struct {
     float theta;
     float max_elev;
@@ -39,6 +46,16 @@ typedef struct {
     Vector3 origin;
     int count;
 } RayResultBatch; // from ray worker to scan coordinator
+
+typedef struct {
+    int idx;
+    CELL_STATE new_state;
+} VoxelUpdate;
+typedef struct {
+    VoxelUpdate updates[MAX_UPDATED_VOXELS];
+    int count;
+} MapDelta; 
+
 
 
 

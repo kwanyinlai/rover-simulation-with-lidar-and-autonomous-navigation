@@ -1,4 +1,4 @@
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 #include "rendering/scene.h"
 
 

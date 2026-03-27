@@ -11,8 +11,7 @@
 # define LIDAR_SENSOR_H
 
 
-# define MATH_PI 3.14159f
-# define MATH_DEG_TO_RAD (MATH_PI / 180.0f)
+# define MATH_DEG_TO_RAD (M_PI / 180.0f)
 # define MAX_RANGE 30.f
 
 #include "rendering/scene.h"
@@ -34,12 +33,7 @@ float elevations[NUM_RINGS];
  */
 void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map);
 
-static inline float gaussian_noise() {
-    float u1 = (rand() + 1.0f) / (RAND_MAX + 2.0f); // avoid log(0)
-    float u2 = (rand() + 1.0f) / (RAND_MAX + 2.0f);
-    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.14159f * u2);
-    // TODO: hard coded PI, if needed more, then define a constant for it.
-}
+#include "core/noise.h"
 
 
 void init_sensor_rays();

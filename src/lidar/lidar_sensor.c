@@ -1,7 +1,8 @@
-# include "rendering/vec3.h"
+# include "core/vec3.h"
 # include "lidar/raycaster.h"
 # include <math.h>
 # include <stdlib.h>
+# include "core/noise.h"
 # include "lidar/point_cloud.h"
 # include "lidar/occupancy_map.h"
 # include "lidar/lidar_sensor.h"
@@ -83,10 +84,14 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
     write(g_scan_cmd_fd, &scan_request, sizeof(ScanRequest));
     RayResultBatch ray_result_batch;
     for (int i = 0; i < NUM_WORKERS; i++) {
-        RayResultBatch ray_result_batch;
         ssize_t n = read(g_ray_batch_results_fd, &ray_result_batch, sizeof(RayResultBatch));
         if (n == sizeof(RayResultBatch)) {
-            point_cloud_push_back_multiple(point_cloud, ray_result_batch.rays, ray_result_batch.count);
+            for (int j = 0; j < ray_result_batch.count; j++) {
+                RayResult *r = &ray_result_batch.rays[j];
+                if (r->distance > 0.0f) {
+                    point_cloud_push_back(point_cloud, r->hit, r->distance, r->intensity);
+                }
+            }
         }
     }
 }

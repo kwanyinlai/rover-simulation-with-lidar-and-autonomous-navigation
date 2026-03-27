@@ -2,6 +2,7 @@
 #include "lidar/occupancy_map.h"
 #include "lidar/lidar_sensor.h"
 #include <sys/mman.h>
+# include <unistd.h>
 
 #define FREE_THRESHOLD -0.4f
 #define OCCUPIED_THRESHOLD 0.4f
@@ -51,10 +52,10 @@ int occupancy_map_in_bounds(const OccupancyMap *map, int x, int y, int z){
 }
 
 // @see https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm)
-// 
 // interestingly, this algorithm was developed at UofT -- ignore the YorkU affiliation
 // @see http://www.cse.yorku.ca/~amana/research/grid.pdf
-void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, Vector3 hit, int did_hit){
+void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, 
+    Vector3 hit, int did_hit, MapDelta *out_data){
     int x = (int)floorf((origin.x - map->origin.x) / map->cell_size);
     int y = (int)floorf((origin.y - map->origin.y) / map->cell_size);
     int z = (int)floorf((origin.z - map->origin.z) / map->cell_size);
@@ -120,9 +121,15 @@ void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, Vector3 hit
         float density_scale = (current_dist * current_dist) / 
                             (REFERENCE_DIST * REFERENCE_DIST);
         density_scale = fmaxf(0.1f, fminf(density_scale, 1.0f)); // clamp
-
+        
+        CELL_STATE prev_state = occupancy_map_get_cell(map, x, y, z);
         map->data[VOXEL_IDX(map, x, y, z)] -= MISS_LOG_ODDS * density_scale;
-        map->data[VOXEL_IDX(map, x, y, z)] -= MISS_LOG_ODDS; // update log-odds since implicitly free by ray passing
+        CELL_STATE new_state = occupancy_map_get_cell(map, x, y, z);
+
+        if (prev_state != new_state){
+            out_data->updates[out_data->count++] = (VoxelUpdate){.idx = VOXEL_IDX(map, x, y, z), .new_state = new_state};
+        }
+
         if (t_x < t_y && t_x < t_z) {
             x += step_x;
             t_x += dx;
@@ -134,11 +141,16 @@ void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, Vector3 hit
             t_z += dz;
         }
     }
-
+    CELL_STATE prev_state = occupancy_map_get_cell(map, hit_x, hit_y, hit_z);
     if (did_hit && occupancy_map_in_bounds(map, hit_x, hit_y, hit_z)) {
         map->data[VOXEL_IDX(map, hit_x, hit_y, hit_z)] += HIT_LOG_ODDS; 
     }
+    CELL_STATE new_state = occupancy_map_get_cell(map, hit_x, hit_y, hit_z);
+    if (prev_state != new_state){
+        out_data->updates[out_data->count++] = (VoxelUpdate){.idx = VOXEL_IDX(map, hit_x, hit_y, hit_z), .new_state = new_state};
+    }
 }
+
 
 int occupancy_map_get_frontier(const OccupancyMap *map, Vector3 *out_pos, int max_frontiers){
     int count = 0;

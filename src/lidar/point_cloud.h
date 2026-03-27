@@ -9,7 +9,7 @@
 #ifndef POINT_CLOUD_H
 #define POINT_CLOUD_H
 
-#include "rendering/vec3.h"
+#include "core/vec3.h"
 
 # include "piping/messages.h"
 

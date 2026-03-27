@@ -1,13 +1,8 @@
 #ifndef OCCUPANCY_MAP_H
 #define OCCUPANCY_MAP_H
 
-#include "rendering/vec3.h"
-
-typedef enum {
-    UNKNOWN = 0,
-    FREE = 1,
-    OCCUPIED = 2
-} CELL_STATE;
+#include "core/vec3.h"
+#include "piping/messages.h"
 
 typedef struct {
     float *data;
@@ -25,7 +20,7 @@ CELL_STATE occupancy_map_get_cell(const OccupancyMap *map, int x, int y, int z);
 CELL_STATE occupancy_map_classify_log_prob(float log_prob);
 int occupancy_map_in_bounds(const OccupancyMap *map, int x, int y, int z);
 
-void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, Vector3 hit, int did_hit);
+void occupancy_map_ray_cast(const OccupancyMap *map, Vector3 origin, Vector3 hit, int did_hit, MapDelta *out_data);
 
 int occupancy_map_get_frontier(const OccupancyMap *map, Vector3 *out_pos, int max_frontiers);
 

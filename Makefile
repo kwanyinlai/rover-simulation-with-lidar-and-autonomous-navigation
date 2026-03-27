@@ -7,10 +7,11 @@ SRCS_DIR = src
 UNAME := $(shell uname)
 
 ifeq ($(UNAME), Darwin)
-    CFLAGS += -DGL_SILENCE_DEPRECATION
-    LIBS = -framework OpenCL -framework GLUT -framework OpenGL -lm
+	CFLAGS += -DGL_SILENCE_DEPRECATION -I/opt/homebrew/include
+	LIBS = -framework OpenCL -framework GLUT -framework OpenGL -lGLEW -L/opt/homebrew/lib -lm
 else
-    LIBS = -lGL -lGLU -lglut -lm
+	CFLAGS += -I/usr/include
+	LIBS = -lGLEW -lGL -lGLU -lglut -lm
 endif
 
 TARGET = $(BUILD_DIR)/lidar_sim
