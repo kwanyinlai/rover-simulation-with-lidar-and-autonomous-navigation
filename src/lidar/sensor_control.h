@@ -8,21 +8,21 @@
 # include "core/vec3.h"
 # include "piping/messages.h"
 
-void init_sensor_state();
+void init_sensor_state(void);
 
 void get_sensor_pos(Vector3 *pos);
 
 void set_throttle(float value);
 
-float get_throttle();
+float get_throttle(void);
 
 void set_steer(float value);
 
-float get_steer();
+float get_steer(void);
 
-float get_sensor_dir_angle();
+float get_sensor_dir_angle(void);
 
-float get_sensor_velocity();
+float get_sensor_velocity(void);
 
 void rover_control(float dt);
 

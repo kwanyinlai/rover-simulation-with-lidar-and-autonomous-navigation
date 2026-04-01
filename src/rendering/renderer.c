@@ -10,10 +10,10 @@
 
 # include "core/vec3.h"
 # include "rendering/scene.h"
-# include "rendering/scene_state.h"
-# include "lidar/point_cloud.h"
+# include "scene/scene_state.h"
+# include "scene/point_cloud.h"
 # include "lidar/sensor_control.h"
-# include "lidar/occupancy_map.h"
+# include "scene/occupancy_map.h"
 # include <string.h>
 
 
@@ -25,7 +25,7 @@
 
 # define MAX_VISIBLE_VOXELS 1000000
 
-void render_wire(){
+void render_wire(void){
     glLineWidth(0.4f);
     glColor3f(0.15f, 0.15f, 0.18f);
     for(int i = 0 ; i < scene.size; i++){
@@ -72,30 +72,30 @@ void render_cloud(PointCloud *cloud, float dt){
     glEnd();
 }
 
-void render_occupancy_map(const OccupancyMap *map){
+void render_occupancy_map(const OccupancyMap *occupancy_grid_3d){
     glBegin(GL_LINES);
-    for (int z = 0; z < map->depth; z++)
-    for (int y = 0; y < map->height; y++)
-    for (int x = 0; x < map->width; x++) {
-        CELL_STATE state = occupancy_map_get_cell(map, x, y, z);
+    for (int z = 0; z < occupancy_grid_3d->depth; z++)
+    for (int y = 0; y < occupancy_grid_3d->height; y++)
+    for (int x = 0; x < occupancy_grid_3d->width; x++) {
+        CELL_STATE state = occupancy_map_get_cell(occupancy_grid_3d, x, y, z);
         if (state == OCCUPIED){
-            float log_odds = occupancy_map_get_log_odds(map, x, y, z);
+            float log_odds = occupancy_map_get_log_odds(occupancy_grid_3d, x, y, z);
             float confidence = fminf(1.0f, log_odds / 5.0f) * 0.5f;
             glColor4f(confidence, 0.0f, 0.0f, 0.5f);
             float r = 1.0f, g = 0.0f, b = 0.0f; // red for occupied
             glColor4f(r * confidence, g * confidence, b * confidence, 0.5f);
             
         }
-        else if (state == FREE && is_frontier_point(map, x, y, z)){
+        else if (state == FREE && is_frontier_point(occupancy_grid_3d, x, y, z)){
             float r = 0.80f, g = 0.80f, b = 0.80f; // green for frontier
             glColor4f(r, g, b, 0.1f);
         }
         else continue; // skip free and unknown cells
         
-        float centre_x = map->origin.x + (x + 0.5f) * map->cell_size;
-        float centre_y = map->origin.y + (y + 0.5f) * map->cell_size;
-        float centre_z = map->origin.z + (z + 0.5f) * map->cell_size;
-        float h = map->cell_size * 0.45f; // half extent
+        float centre_x = occupancy_grid_3d->origin.x + (x + 0.5f) * occupancy_grid_3d->cell_size;
+        float centre_y = occupancy_grid_3d->origin.y + (y + 0.5f) * occupancy_grid_3d->cell_size;
+        float centre_z = occupancy_grid_3d->origin.z + (z + 0.5f) * occupancy_grid_3d->cell_size;
+        float h = occupancy_grid_3d->cell_size * 0.45f; // half extent
 
 
         // drawing cube using line segments
@@ -124,7 +124,7 @@ float lerp(float a, float b, float t){
     return a + (b - a) * t;
 }
 
-void render_sensor(){
+void render_sensor(void){
     Vector3 sensor_pos;
     get_sensor_pos(&sensor_pos);
     glPushMatrix();

@@ -3,11 +3,11 @@
 # include "lidar/raycaster.h"
 # include <math.h>
 # include <stdlib.h>
-# include "lidar/point_cloud.h"
-# include "lidar/occupancy_map.h"
+# include "scene/point_cloud.h"
+# include "scene/occupancy_map.h"
 # include "lidar/lidar_sensor.h"
 
-# include "lidar/physics.h"
+# include "core/physics_constants.h"
 
 
 
@@ -16,7 +16,7 @@ static SensorState ss;
 static float throttle; // -1, 0 or 1, for backward and forward
 static float steer; // -1, 0 or 1, for left and right'
 
-void init_sensor_state(){
+void init_sensor_state(void){
    
     ss.origin = (Vector3){0.0f, 1.0f, 0.0f};
 
@@ -36,7 +36,7 @@ void set_throttle(float value){
     throttle = fmaxf(-1.0f, fminf(1.0f, value));
 }
 
-float get_throttle(){
+float get_throttle(void){
     return throttle;
 }
 
@@ -44,15 +44,15 @@ void set_steer(float value){
     steer = fmaxf(-1.0f, fminf(1.0f, value));
 }
 
-float get_steer(){
+float get_steer(void){
     return steer;
 }
 
-float get_sensor_dir_angle() {
+float get_sensor_dir_angle(void) {
     return ss.dir_angle;
 }
 
-float get_sensor_velocity() {
+float get_sensor_velocity(void) {
     return ss.speed;
 }
 

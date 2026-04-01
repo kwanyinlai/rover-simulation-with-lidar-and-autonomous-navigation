@@ -15,8 +15,8 @@
 # define MAX_RANGE 30.f
 
 #include "rendering/scene.h"
-#include "lidar/point_cloud.h"
-#include "lidar/occupancy_map.h"
+#include "scene/point_cloud.h"
+#include "scene/occupancy_map.h"
 #include "lidar/sensor_control.h"
 
 
@@ -29,14 +29,14 @@ float elevations[NUM_RINGS];
  * @brief Advance the sensor simulation by one step and collect point cloud data.
  * @param scene Pointer to the scene geometry.
  * @param point_cloud Output point cloud to store detected points.
- * @param map Pointer to the occupancy map.
+ * @param occupancy_grid_3d Pointer to the occupancy grid.
  */
-void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map);
+void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d);
 
 #include "core/noise.h"
 
 
-void init_sensor_rays();
+void init_sensor_rays(void);
 
 #endif // LIDAR_SENSOR_H
 

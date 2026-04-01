@@ -8,15 +8,17 @@
 
 # include "rover_controller.h"
 # include "lidar/sensor_control.h"
+# include "core/physics_constants.h"
 # include "core/noise.h"
+# include "core/math_utils.h"
+
 # include <math.h>
 # include <stdio.h>
+# include <float.h>
 
-# include "lidar/physics.h"
 
 # define WAYPOINT_REACH_DIST 0.4f
 # define WAYPOINT_REACH_THRESHOLD (WAYPOINT_REACH_DIST * WAYPOINT_REACH_DIST)
-
 
 # define STEER_CLAMP_MIN -1.0f
 # define STEER_CLAMP_MAX 1.0f
@@ -26,25 +28,19 @@
 # define THROTTLE_SCALE 0.7f
 # define SLOW_DIST_SQR 2.25f
 
-
 # define PREDICT_THROTTLE_BASE 0.05f
 # define PREDICT_THROTTLE_SCALE 0.95f
 # define PREDICT_SLOW_DIST_SQR 1.5f
 
+# define SPEED_NOISE 0.f // no noise for now while testing
+# define ANGULAR_NOISE 0.f
 
-# define SPEED_NOISE 0.2f
-# define ANGULAR_NOISE 0.15f
 
-
-# define KP 0.8f
-# define KD 0.6f
 
 # define LOOK_AHEAD_STEPS 20
 # define LOOK_AHEAD_DT 0.05f
 
-
 # define PREDICT_BLEND_WEIGHT 0.4f
-
 
 # define PREDICTION_STEPS  60
 # define PREDICTION_DT 0.05f // 60 x 0.05 = 3s prediction
@@ -53,22 +49,6 @@
 SensorState rover_pose  = {0}; // 
 Path active_path = {0};
 RoverMode rover_mode = MODE_AUTO;
-
-
-typedef struct {
-    float x, z;
-    float dir_angle;
-    float speed;
-    float ang_speed;
-    int wp_idx;
-} SimState;
-
-// Wrap `raw` into (−π, π].
-static inline float wrap_angle(float raw) {
-    while (raw >  (float)M_PI) raw -= 2.0f * (float)M_PI;
-    while (raw < -(float)M_PI) raw += 2.0f * (float)M_PI;
-    return raw;
-}
 
 
 static void sim_control(const SimState *sim_state,
@@ -122,11 +102,10 @@ static void sim_step(SimState *sim_state, float throttle, float steer, float dt)
     }
     else {
         float friction_amt = ANGULAR_FRICTION * dt;
-        if (sim_state->ang_speed > 0.0f){
-            sim_state->ang_speed = fmaxf(0.0f, sim_state->ang_speed - friction_amt);
-        }
-        else {
-            sim_state->ang_speed = fminf(0.0f, sim_state->ang_speed + friction_amt);
+        if (fabsf(rover_pose.angular_speed) < friction_amt) {
+            rover_pose.angular_speed = 0.0f;
+        } else {
+            rover_pose.angular_speed -= friction_amt * (rover_pose.angular_speed > 0.0f ? 1.0f : -1.0f);
         }
     }
     sim_state->ang_speed = fmaxf(-MAX_ANGULAR_SPEED, fminf(MAX_ANGULAR_SPEED, sim_state->ang_speed));
@@ -279,6 +258,10 @@ void set_waypoints(Waypoint *points, int count) {
 }
 
 
+
+
+
+/* BELOW IS FOR RENDERING MOVEMENT DATA */
 void render_predicted_path(void)
 {
     if (active_path.current >= active_path.count) return;
@@ -310,8 +293,6 @@ void render_predicted_path(void)
         float throttle, steer;
         sim_control(&sim_state, &throttle, &steer, 1); // 1 = use predictive gains
         sim_step(&sim_state, throttle, steer, PREDICTION_DT);
-
-
 
         glColor3f(1.0f, 1.0f, 1.0f);
         glVertex3f(sim_state.x, 0.25f, sim_state.z);
@@ -366,6 +347,27 @@ void render_pose_error(void) {
     glPointSize(1.0f);
 
 }
+
+
+void render_waypoints(void)
+{
+    if (active_path.count == 0) return;
+
+
+    glPointSize(8.0f);
+    glBegin(GL_POINTS);
+    for (int i = active_path.current; i < active_path.count; i++) {
+        if (i == active_path.current) {
+            glColor3f(1.0f, 1.0f, 0.0f);
+        } else {
+            glColor3f(0.3f, 0.8f, 0.6f); 
+        }
+        glVertex3f(active_path.waypoints[i].x, 0.25f, active_path.waypoints[i].z);
+    }
+    glEnd();
+    glPointSize(1.0f);
+}
+
 
 /* 
    Autonomous loop checklist

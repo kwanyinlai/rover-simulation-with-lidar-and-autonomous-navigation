@@ -1,4 +1,4 @@
-#include "lidar/point_cloud.h"
+#include "scene/point_cloud.h"
 #include "piping/messages.h"
 #define INIT_SIZE 32
 
@@ -29,7 +29,6 @@ void point_cloud_push_back_multiple(PointCloud *pc, RayResult *rays, size_t coun
     }
     // probably is a faster more efficient way
 }
-
 
 void point_cloud_free(PointCloud *pc) {
     free(pc->data);

@@ -50,14 +50,17 @@ typedef struct {
 typedef struct {
     int idx;
     CELL_STATE new_state;
+    CELL_STATE prev_state;
 } VoxelUpdate;
+
 typedef struct {
     VoxelUpdate updates[MAX_UPDATED_VOXELS];
     int count;
-} MapDelta; 
+} MapDelta;
 
-
-
+typedef struct {
+    int is_blocking_count; // OCCUPIED or UNKNOWN count in this column
+} ColumnSummary;
 
 
 // TODO: some frontier message

@@ -8,8 +8,9 @@
 #include "core/vec3.h"
 #include "rendering/scene.h"
 #include "rendering/renderer.h"
-#include "rendering/scene_state.h"
+#include "scene/scene_state.h"
 #include "lidar/sensor_control.h"
+#include "rover/rover_controller.h"
 
 
 #define MATH_DEG_TO_RAD (M_PI / 180.0f)
@@ -39,7 +40,9 @@ int is_render_scene = 1;
 int is_paused = 0;
 int toggle_frontiers = 0;
 
-void apply_camera() {
+extern RoverMode rover_mode;
+
+void apply_camera(void) {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     float theta_rad = cam_theta * MATH_DEG_TO_RAD;
@@ -95,6 +98,11 @@ void keyboard(unsigned char key, int x, int y) {
         case 'D':
             set_steer(1.0f);
             break;
+        case 'c':
+        case 'C':
+            if (rover_mode == MODE_MANUAL) rover_mode = MODE_AUTO;
+            else rover_mode = MODE_MANUAL;
+
     }
     glutPostRedisplay();
 }

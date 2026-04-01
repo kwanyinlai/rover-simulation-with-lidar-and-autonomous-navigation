@@ -1,6 +1,6 @@
 
 /**
- * @file scene.h
+ * @file scene/scene
  * @brief Scene geometry definitions and utilities.
  *
  * Provides data structures and functions for representing and manipulating 3D scene geometry.

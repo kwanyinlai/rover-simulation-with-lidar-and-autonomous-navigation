@@ -3,8 +3,8 @@
 # include <math.h>
 # include <stdlib.h>
 # include "core/noise.h"
-# include "lidar/point_cloud.h"
-# include "lidar/occupancy_map.h"
+# include "scene/point_cloud.h"
+# include "scene/occupancy_map.h"
 # include "lidar/lidar_sensor.h"
 # include "lidar/sensor_control.h"
 # include "piping/messages.h"
@@ -19,7 +19,7 @@
 # define ANGULAR_ACCELERATION (150.0f * MATH_DEG_TO_RAD)
 # define FRICTION 2.f
 # define ANGULAR_FRICTION (130.0f * MATH_DEG_TO_RAD)
-# define STEP 0.01f
+# define STEP 0.02f
 
 
 static float theta;
@@ -34,7 +34,7 @@ int g_ray_batch_results_fd = -1;
 // @see https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
 
 /* LEGACY CAST RAYS
-void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map){
+void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){
     const float noise_factor = 0.01f; // realistic noise strength (2% of distance)
     for (int i = 0 ; i < NUM_RINGS ; i++){
         Vector3 hit;
@@ -50,14 +50,14 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
         get_sensor_pos(&origin);
         float dist = cast_ray(scene, &(origin), dir, &hit, &intensity);
         if (dist > 0.0f) {
-            occupancy_map_ray_cast(map, origin, hit, 1);
+            occupancy_map_ray_cast(occupancy_grid_3d, origin, hit, 1);
         } else {
             Vector3 max_range_point = {
                 origin.x + dir.x * MAX_RANGE,
                 origin.y + dir.y * MAX_RANGE,
                 origin.z + dir.z * MAX_RANGE
             };
-            occupancy_map_ray_cast(map, origin, max_range_point, 0);
+            occupancy_map_ray_cast(occupancy_grid_3d, origin, max_range_point, 0);
         }
         if (dist > 0) {
             float noise = gaussian_noise();
@@ -73,7 +73,7 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
 }
 */
 
-void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map){
+void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){
     ScanRequest scan_request = {
         .theta = theta,
         .max_elev = max_elev_angle,
@@ -96,12 +96,12 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
     }
 }
 
-void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *map){
+void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){
     theta += STEP;
-    cast_all_rays(scene, point_cloud, map);
+    cast_all_rays(scene, point_cloud, occupancy_grid_3d);
 }
 
-void init_sensor_rays(){
+void init_sensor_rays(void){
     for (int i = 0 ; i < NUM_RINGS ; i++){
         elevations[i] = min_elev_angle +
           i * (max_elev_angle - min_elev_angle) / NUM_RINGS;

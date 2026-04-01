@@ -9,7 +9,7 @@
 #ifndef SCENE_STATE_H
 #define SCENE_STATE_H
 
-#include "scene.h"
+#include "rendering/scene.h"
 
 /**
  * @brief Global scene geometry instance.

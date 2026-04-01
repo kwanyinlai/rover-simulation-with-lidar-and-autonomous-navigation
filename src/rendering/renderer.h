@@ -9,12 +9,12 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include "lidar/point_cloud.h"
-#include "lidar/occupancy_map.h"
+#include "scene/point_cloud.h"
+#include "scene/occupancy_map.h"
 /**
  * @brief Render the scene geometry as wireframe.
  */
-void render_wire();
+void render_wire(void);
 
 /**
  * @brief Render the lidar point cloud.
@@ -23,12 +23,12 @@ void render_wire();
  */
 void render_cloud(PointCloud *cloud, float dt);
 
-void render_occupancy_map(const OccupancyMap *map);
+void render_occupancy_map(const OccupancyMap *occupancy_grid_3d);
 
 /**
  * @brief Render the lidar sensor visualization.
  */
-void render_sensor();
+void render_sensor(void);
 
 
 #endif // RENDERER_H

@@ -11,7 +11,7 @@
 
 #include "core/vec3.h"
 #include "rendering/scene.h"
-#include "lidar/point_cloud.h"
+#include "scene/point_cloud.h"
 
 float cast_ray(const TriangleArray *scene, 
     const Vector3 *origin, 
