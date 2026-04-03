@@ -3,6 +3,7 @@
 #define MESSAGES_H
 
 # include "core/vec3.h"
+# include "rover/rover_controller.h"
 
 
 # define MAX_UPDATED_VOXELS 4028
@@ -61,6 +62,37 @@ typedef struct {
 typedef struct {
     int is_blocking_count; // OCCUPIED or UNKNOWN count in this column
 } ColumnSummary;
+
+typedef struct {
+    int frame_id;
+    int sample_count;
+    int horizon;
+    SimState init_state;
+    Path path_snapshot;
+    float nom_steer[MPPI_HORIZON];
+    float nom_throttle[MPPI_HORIZON];
+    float steer_noise[MPPI_SAMPLES][MPPI_HORIZON];
+    float throttle_noise[MPPI_SAMPLES][MPPI_HORIZON];
+} MppiEvalRequest;
+
+typedef struct {
+    int frame_id;
+    int start_sample_idx;
+    int end_sample_idx;
+    MppiEvalRequest request;
+} MppiWorkerJob;
+
+typedef struct {
+    int frame_id;
+    int start_sample_idx;
+    int end_sample_idx;
+    float costs[MPPI_SAMPLES];
+} MppiWorkerResult;
+
+typedef struct {
+    int frame_id;
+    float costs[MPPI_SAMPLES];
+} MppiEvalResult;
 
 
 // TODO: some frontier message

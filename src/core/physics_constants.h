@@ -6,5 +6,3 @@
 # define ANGULAR_FRICTION (150.0f * MATH_DEG_TO_RAD)
 # define MATH_DEG_TO_RAD (M_PI / 180.0f)
 
-
-

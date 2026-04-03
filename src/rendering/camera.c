@@ -34,11 +34,19 @@ static int right_down = 0;
 static int middle_down = 0;
 static int prev_rotate_x, prev_rotate_y;
 static int prev_pan_x, prev_pan_y;
+
 // ========================================
 
 int is_render_scene = 1;
 int is_paused = 0;
-int toggle_frontiers = 0;
+int toggle_occupancy_map_2d = 0;
+int toggle_occupancy_map_3d = 0;
+
+static int manual_pause = 0;
+
+static void sync_pause_state(void) {
+    is_paused = manual_pause || toggle_occupancy_map_3d;
+}
 
 extern RoverMode rover_mode;
 
@@ -76,11 +84,17 @@ void keyboard(unsigned char key, int x, int y) {
             break;
         case 'p':
         case 'P':
-            is_paused = !is_paused;
+            manual_pause = !manual_pause;
+            sync_pause_state();
             break;
         case 'f':
         case 'F':
-            toggle_frontiers = !toggle_frontiers;
+            toggle_occupancy_map_2d = !toggle_occupancy_map_2d;
+            break;
+        case 'g':
+        case 'G':
+            toggle_occupancy_map_3d = !toggle_occupancy_map_3d;
+            sync_pause_state();
             break;
         case 'w':
         case 'W':
@@ -100,8 +114,15 @@ void keyboard(unsigned char key, int x, int y) {
             break;
         case 'c':
         case 'C':
-            if (rover_mode == MODE_MANUAL) rover_mode = MODE_AUTO;
-            else rover_mode = MODE_MANUAL;
+            if (rover_mode == MODE_MANUAL) {
+                rover_mode = MODE_AUTO;
+            }
+            else {
+                rover_mode = MODE_MANUAL;
+            }
+            // clear stale controls
+            set_throttle(0.0f);
+            set_steer(0.0f);
 
     }
     glutPostRedisplay();

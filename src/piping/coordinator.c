@@ -1,5 +1,7 @@
 #include "piping/method_dispatcher.h"
 #include "piping/messages.h"
+#include <string.h>
+
 
 #include <unistd.h>
 
@@ -45,5 +47,68 @@ void run_coordinator_loop(int scan_cmd_read_fd, int ray_batch_writes_fd,
                 }
             }
         }
+    }
+}
+
+void run_mppi_coordinator_loop(int mppi_cmd_read_fd,
+                               int mppi_result_write_fd,
+                               int mppi_task_pipes[NUM_WORKERS][2],
+                               int mppi_result_pipes[NUM_WORKERS][2]) {
+    MppiEvalRequest request;
+    while (read(mppi_cmd_read_fd, &request, sizeof(MppiEvalRequest)) > 0) {
+        int samples_per_worker = request.sample_count / NUM_WORKERS;
+        // assumption of divisibility, and losing samples is fine
+        int remainder = request.sample_count % NUM_WORKERS;
+        int start = 0;
+
+        for (int i = 0; i < NUM_WORKERS; i++) {
+            MppiWorkerJob job = {
+                .request = request,
+                .frame_id = request.frame_id,
+                .start_sample_idx = start,
+                .end_sample_idx = start + samples_per_worker
+            };
+
+            write(mppi_task_pipes[i][1], &job, sizeof(MppiWorkerJob));
+            start += samples_per_worker;
+        }
+
+        MppiEvalResult merged;
+        merged.frame_id = request.frame_id;
+        memset(merged.costs, 0, sizeof(merged.costs));
+
+        int workers_done = 0;
+        int done[NUM_WORKERS] = {0};
+        while (workers_done < NUM_WORKERS) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            int max_fd = -1;
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                if (!done[i]) {
+                    FD_SET(mppi_result_pipes[i][0], &read_fds);
+                    if (mppi_result_pipes[i][0] > max_fd) {
+                        max_fd = mppi_result_pipes[i][0];
+                    }
+                }
+            }
+
+            select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                if (!done[i] && FD_ISSET(mppi_result_pipes[i][0], &read_fds)) {
+                    MppiWorkerResult batch;
+                    if (read(mppi_result_pipes[i][0], &batch, sizeof(MppiWorkerResult)) <= 0) {
+                        continue;
+                    }
+                    for (int s = batch.start_sample_idx; s < batch.end_sample_idx; s++) {
+                        merged.costs[s] = batch.costs[s];
+                    }
+                    done[i] = 1;
+                    workers_done++;
+                }
+            }
+        }
+
+        write(mppi_result_write_fd, &merged, sizeof(MppiEvalResult));
     }
 }

@@ -19,9 +19,12 @@
 #include "scene/occupancy_map.h"
 #include "lidar/sensor_control.h"
 
-
-extern int g_scan_cmd_fd; // file descriptor for sending scan commands to coordinator process, set in main.c after forking processes
-extern int g_ray_batch_results_fd; // file descriptor for receiving ray batch results from worker processes, set in main.c after forking processes
+/**
+ * @brief Configure IPC file descriptors used by the lidar scan pipeline.
+ * @param scan_cmd_fd Write descriptor for scan requests.
+ * @param ray_batch_results_fd Read descriptor for ray result batches.
+ */
+void set_scan_pipe_fds(int scan_cmd_fd, int ray_batch_results_fd);
 
 float elevations[NUM_RINGS];
 
@@ -33,9 +36,9 @@ float elevations[NUM_RINGS];
  */
 void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d);
 
-#include "core/noise.h"
-
-
+/**
+ * @brief Initialize vertical ray elevation angles for one full lidar revolution.
+ */
 void init_sensor_rays(void);
 
 #endif // LIDAR_SENSOR_H

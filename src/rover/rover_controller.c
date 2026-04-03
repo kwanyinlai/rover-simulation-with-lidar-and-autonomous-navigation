@@ -12,19 +12,22 @@
 #include "core/physics_constants.h"
 #include "core/noise.h"
 #include "core/math_utils.h"
+#include "rover/rover_physics.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <float.h>
 #include <unistd.h>
 #include <string.h>
+#include "piping/messages.h"
 
 // https://acdelta_steerlab.github.io/mppi-generic-website/docs/mppi.html
 // MPPI Controller -- Model Predictive Path Integral
 
 // MPPI hyperparameters
-#define MPPI_SAMPLES 128 // parallel rollouts per frame
-#define MPPI_HORIZON 24 // steps per rollout
+// #define MPPI_SAMPLES 32 // parallel rollouts per frame
+// #define MPPI_HORIZON 24 // steps per rollout
+// defined partially in rover_controller.h
 #define MPPI_DT 0.05f // rollout timestep
 #define MPPI_LAMBDA 0.5f // temperature (0 = greedy, inf = uniform random)
 
@@ -65,8 +68,11 @@ SensorState rover_pose = {0};
 Path active_path = {0};
 RoverMode rover_mode = MODE_AUTO;
 
-int require_replan_write_fd = -1;
+static int require_replan_write_fd = -1;
 static int replan_request_sent = 0;
+static int mppi_cmd_write_fd = -1;
+static int mppi_result_read_fd = -1;
+static int mppi_frame_id = 0;
 
 // nominal steer and throttle, warm started with previous frame'sim_state optimal
 static float nom_steer[MPPI_HORIZON];
@@ -78,36 +84,14 @@ static float throttle_noise[MPPI_SAMPLES][MPPI_HORIZON];
 static float trajectory_cost[MPPI_SAMPLES];
 
 
-
-// cost function
-
-#define W_CROSS_TRACK 3.5f // penalise distancing from path center
+// rollout cost weights
+#define W_CROSS_TRACK 3.5f // penalise distancing from path centre
 #define W_HEADING 1.2f // penalise heading vs path tangent
 #define W_STEER_RATE 2.0f // penalise changes in steering
 #define W_SPEED 0.3f // penalise changes from desired speed
-#define W_THROTTLE_EFFORT 0.15f // penalise large throttle commandelta_steer
-#define W_TERMINAL_CROSS_TRACK 6.0f // terminal cross-track (heavier for stability)
-#define W_TERMINAL_HEADING 2.0f // terminal heading
-#define W_PROGRESS 0.4f // reward for progress along path
-
-static float cost_function(const SimState *state,
-                           float cross_track_error,
-                           float heading_error,
-                           int nearest_segment,
-                           float steer_cmd,
-                           float throttle_cmd,
-                           float prev_steer)
-{
-    // encourage path progress
-    float progress_reward = (float)(nearest_segment - active_path.current);
-
-    return W_CROSS_TRACK * (cross_track_error * cross_track_error)
-         + W_HEADING * (heading_error * heading_error)
-         + W_STEER_RATE * ((steer_cmd - prev_steer) * (steer_cmd - prev_steer))
-         + W_THROTTLE_EFFORT * (throttle_cmd * throttle_cmd)
-         + W_SPEED * ((state->speed - SPEED_REF) * (state->speed - SPEED_REF))
-         - progress_reward;
-}
+#define W_THROTTLE_EFFORT 0.15f // penalise throttle usage
+#define W_TERMINAL_CROSS_TRACK 6.0f // terminal cost to heavily penalise ending far from path centre
+#define W_TERMINAL_HEADING 2.0f // terminal cost to penalise ending with heading error
 
 
 
@@ -117,7 +101,10 @@ static float cost_function(const SimState *state,
 #define LOOK_AHEAD 6
 
 // Returns cross-track error, and outputs nearest path tangent angle and index of nearest line segment in path
-static float project_rover_to_path_segment(float rover_x, float rover_z, int waypoint_hint,
+static float project_rover_to_path_segment(const Path *path,
+                                           float rover_x,
+                                           float rover_z,
+                                           int waypoint_hint,
                                            float *dir_angle_out, int *nearest_line_seg_out)
 {
     // waypoint hint to maintain path continuity
@@ -127,13 +114,13 @@ static float project_rover_to_path_segment(float rover_x, float rover_z, int way
     *nearest_line_seg_out = waypoint_hint;
 
     int start_segment = waypoint_hint - LOOK_BACK > 0 ? waypoint_hint - LOOK_BACK : 0;
-    int end_segment = waypoint_hint + LOOK_AHEAD >= active_path.count ? active_path.count - 1 : waypoint_hint + LOOK_AHEAD;
+    int end_segment = waypoint_hint + LOOK_AHEAD >= path->count ? path->count - 1 : waypoint_hint + LOOK_AHEAD;
 
     for (int i = start_segment; i < end_segment; i++) {
-        float wp1_x = active_path.waypoints[i].x;
-        float wp1_z = active_path.waypoints[i].z;
-        float wp2_x = active_path.waypoints[i + 1].x;
-        float wp2_z = active_path.waypoints[i + 1].z;
+        float wp1_x = path->waypoints[i].x;
+        float wp1_z = path->waypoints[i].z;
+        float wp2_x = path->waypoints[i + 1].x;
+        float wp2_z = path->waypoints[i + 1].z;
 
         float dx = wp2_x - wp1_x;
         float dz = wp2_z - wp1_z;
@@ -165,44 +152,23 @@ static float project_rover_to_path_segment(float rover_x, float rover_z, int way
 
 
 static void rollout_simulation(SimState *sim_state, float throttle, float steer, float dt) {
-    // mirrors of physics in sensor_control.c
-    if (throttle != 0) {
-        sim_state->speed += throttle * ACCELERATION * dt;
-        sim_state->speed = fmaxf(-MAX_SPEED, fminf(MAX_SPEED, sim_state->speed));
-    } 
-    else {
-        // natural deceleration
-        float friction = FRICTION * dt;
-        if (sim_state->speed > 0) {
-            sim_state->speed = fmaxf(0.0f, sim_state->speed - friction);
-        } 
-        else {
-            sim_state->speed = fminf(0.0f, sim_state->speed + friction);
-        }
-    }
-    if (steer != 0.f) {
-        sim_state->angular_speed += steer * ANGULAR_ACCELERATION * dt;
-        sim_state->angular_speed = fmaxf(-MAX_ANGULAR_SPEED, fminf(MAX_ANGULAR_SPEED, sim_state->angular_speed));
-    }
-    else {
-        float friction = ANGULAR_FRICTION * dt;
-        if (fabsf(sim_state->angular_speed) < friction) sim_state->angular_speed = 0.0f;
-        else sim_state->angular_speed -= friction * (sim_state->angular_speed > 0 ? 1 : -1);
-    }
-
-    sim_state->dir_angle += sim_state->angular_speed * dt;
-    float dx = cosf(sim_state->dir_angle) * sim_state->speed * dt;
-    float dz = sinf(sim_state->dir_angle) * sim_state->speed * dt;
-    if (!can_move_in_dir(&scene, &sim_state->x, &sim_state->z, dx, dz, ROVER_COLLISION_RADIUS)) {
-        sim_state->speed = 0.0f;
-    }
+    step_rover_physics(&sim_state->x,
+                       &sim_state->z,
+                       &sim_state->dir_angle,
+                       &sim_state->speed,
+                       &sim_state->angular_speed,
+                       throttle,
+                       steer,
+                       dt,
+                       &scene,
+                       ROVER_COLLISION_RADIUS);
 
 }
 
 
 static float rollout_cost(int i)
 {
-    SimState sim_state = {
+    SimState init_state = {
         .x = rover_pose.origin.x,
         .z = rover_pose.origin.z,
         .dir_angle = rover_pose.dir_angle,
@@ -211,53 +177,144 @@ static float rollout_cost(int i)
         .wp_idx = active_path.current
     };
 
+    return mppi_compute_rollout_cost(&scene,
+                                     &active_path,
+                                     init_state,
+                                     MPPI_HORIZON,
+                                     nom_steer,
+                                     nom_throttle,
+                                     steer_noise[i],
+                                     throttle_noise[i]);
+}
+
+float mppi_compute_rollout_cost(const TriangleArray *scene,
+                                const Path *path,
+                                SimState init_state,
+                                int horizon,
+                                const float *nom_steer_seq,
+                                const float *nom_throttle_seq,
+                                const float *steer_noise_seq,
+                                const float *throttle_noise_seq)
+{
+    SimState sim_state = init_state;
     float cost = 0.0f;
-    float prev_steer = nom_steer[0];
+    float prev_steer = nom_steer_seq[0];
 
-    for (int j = 0; j < MPPI_HORIZON; j++) {
-        // candidate control with exploration noise
-        float steer_cmd = clamp_steer(nom_steer[j] + steer_noise[i][j]);
-        float throttle_cmd = clamp_throttle(nom_throttle[j] + throttle_noise[i][j]);
+    for (int j = 0; j < horizon; j++) {
+        float steer_cmd = clamp_steer(nom_steer_seq[j] + steer_noise_seq[j]);
+        float throttle_cmd = clamp_throttle(nom_throttle_seq[j] + throttle_noise_seq[j]);
 
-        // advance waypoint during rollout
-        while (sim_state.wp_idx < active_path.count - 1) {
-            float waypoint_dx = active_path.waypoints[sim_state.wp_idx].x - sim_state.x;
-            float waypoint_dz = active_path.waypoints[sim_state.wp_idx].z - sim_state.z;
-            if (waypoint_dx * waypoint_dx + waypoint_dz * waypoint_dz < WAYPOINT_REACH_THRESHOLD) sim_state.wp_idx++;
+        while (sim_state.wp_idx < path->count - 1) {
+            float waypoint_dx = path->waypoints[sim_state.wp_idx].x - sim_state.x;
+            float waypoint_dz = path->waypoints[sim_state.wp_idx].z - sim_state.z;
+            if (waypoint_dx * waypoint_dx + waypoint_dz * waypoint_dz < WAYPOINT_REACH_THRESHOLD) {
+                sim_state.wp_idx++;
+            } 
             else break;
         }
 
-        // calculate cost
         float path_heading;
         int nearest_segment;
-        float cross_track_error = project_rover_to_path_segment(sim_state.x, sim_state.z, sim_state.wp_idx, &path_heading, &nearest_segment);
+        float cross_track_error = project_rover_to_path_segment(path,
+                                                                sim_state.x,
+                                                                sim_state.z,
+                                                                sim_state.wp_idx,
+                                                                &path_heading,
+                                                                &nearest_segment);
         float heading_error = wrap_angle(sim_state.dir_angle - path_heading);
 
-        // allowing skipping to later segments
-        if (nearest_segment > sim_state.wp_idx) sim_state.wp_idx = nearest_segment;
+        // allow skipping
+        if (nearest_segment > sim_state.wp_idx) {
+            sim_state.wp_idx = nearest_segment;
+        }
 
-        cost += cost_function(&sim_state,
-                              cross_track_error,
-                              heading_error,
-                              nearest_segment,
-                              steer_cmd,
-                              throttle_cmd,
-                              prev_steer);
+        float progress_reward = (float)(nearest_segment - path->current);
+        cost += W_CROSS_TRACK * (cross_track_error * cross_track_error)
+              + W_HEADING * (heading_error * heading_error)
+              + W_STEER_RATE * ((steer_cmd - prev_steer) * (steer_cmd - prev_steer))
+              + W_THROTTLE_EFFORT * (throttle_cmd * throttle_cmd)
+              + W_SPEED * ((sim_state.speed - SPEED_REF) * (sim_state.speed - SPEED_REF))
+              - progress_reward;
 
         prev_steer = steer_cmd;
-        rollout_simulation(&sim_state, throttle_cmd, steer_cmd, MPPI_DT);
+
+        step_rover_physics(&sim_state.x,
+                           &sim_state.z,
+                           &sim_state.dir_angle,
+                           &sim_state.speed,
+                           &sim_state.angular_speed,
+                           throttle_cmd,
+                           steer_cmd,
+                           MPPI_DT,
+                           scene,
+                           ROVER_COLLISION_RADIUS);
     }
 
-    // terminal cost
     float path_heading;
     int nearest_segment;
-    float terminal_cross_track_error = project_rover_to_path_segment(sim_state.x, sim_state.z, sim_state.wp_idx, &path_heading, &nearest_segment);
+    float terminal_cross_track_error = project_rover_to_path_segment(path,
+                                                                     sim_state.x,
+                                                                     sim_state.z,
+                                                                     sim_state.wp_idx,
+                                                                     &path_heading,
+                                                                     &nearest_segment);
     float terminal_heading_error = wrap_angle(sim_state.dir_angle - path_heading);
 
     cost += W_TERMINAL_CROSS_TRACK * (terminal_cross_track_error * terminal_cross_track_error)
           + W_TERMINAL_HEADING * (terminal_heading_error * terminal_heading_error);
 
     return cost;
+}
+
+
+// TODO
+void set_mppi_pipe_fds(int cmd_write_fd, int result_read_fd)
+{
+    mppi_cmd_write_fd = cmd_write_fd;
+    mppi_result_read_fd = result_read_fd;
+}
+
+void set_replan_pipe_fd(int write_fd)
+{
+    require_replan_write_fd = write_fd;
+}
+
+static int evaluate_rollouts_via_pipe(void)
+{
+    if (mppi_cmd_write_fd < 0 || mppi_result_read_fd < 0) {
+        return 0;
+    }
+
+    MppiEvalRequest request;
+    memset(&request, 0, sizeof(request));
+    request.frame_id = mppi_frame_id++;
+    request.sample_count = MPPI_SAMPLES;
+    request.horizon = MPPI_HORIZON;
+    request.init_state = (SimState){
+        .x = rover_pose.origin.x,
+        .z = rover_pose.origin.z,
+        .dir_angle = rover_pose.dir_angle,
+        .speed = rover_pose.speed,
+        .angular_speed = rover_pose.angular_speed,
+        .wp_idx = active_path.current
+    };
+    request.path_snapshot = active_path;
+    memcpy(request.nom_steer, nom_steer, sizeof(nom_steer));
+    memcpy(request.nom_throttle, nom_throttle, sizeof(nom_throttle));
+    memcpy(request.steer_noise, steer_noise, sizeof(steer_noise));
+    memcpy(request.throttle_noise, throttle_noise, sizeof(throttle_noise));
+
+    if (write(mppi_cmd_write_fd, &request, sizeof(MppiEvalRequest)) != sizeof(MppiEvalRequest)) {
+        return 0;
+    }
+
+    MppiEvalResult result;
+    if (read(mppi_result_read_fd, &result, sizeof(MppiEvalResult)) != sizeof(MppiEvalResult)) {
+        return 0;
+    }
+
+    memcpy(trajectory_cost, result.costs, sizeof(trajectory_cost));
+    return 1;
 }
 
 
@@ -272,9 +329,18 @@ static void mppi_update(void){
     }
 
     float min_cost = FLT_MAX;
+
+    // fallback do manually + for testing
+    if (!evaluate_rollouts_via_pipe()) {
+        for (int i = 0; i < MPPI_SAMPLES; i++) {
+            trajectory_cost[i] = rollout_cost(i);
+        }
+    }
+
     for (int i = 0; i < MPPI_SAMPLES; i++) {
-        trajectory_cost[i] = rollout_cost(i);
-        if (trajectory_cost[i] < min_cost) min_cost = trajectory_cost[i];
+        if (trajectory_cost[i] < min_cost) {
+            min_cost = trajectory_cost[i];
+        }
     }
 
     float weights[MPPI_SAMPLES];
@@ -284,7 +350,7 @@ static void mppi_update(void){
         weighted_sum += weights[i];
     }
 
-    // 4. Weighted perturbation update of the nominal sequence
+    // weighted
     for (int j = 0; j < MPPI_HORIZON; j++) {
         float delta_steer = 0.0f;
         float delta_throttle = 0.0f;
@@ -335,36 +401,26 @@ void update_odometry(float dt) {
     float throttle = get_throttle();
     float steer = get_steer();
 
+    float throttle_cmd = throttle;
     if (throttle != 0.0f) {
-        rover_pose.speed += (
-            (throttle * ACCELERATION + gaussian_noise() * SPEED_NOISE * ACCELERATION)
-            * dt
-        );
-        rover_pose.speed = fmaxf(-MAX_SPEED, fminf(MAX_SPEED, rover_pose.speed));
-    } else {
-        float f = FRICTION * dt;
-        if (rover_pose.speed > 0.0f) rover_pose.speed = fmaxf(0.0f, rover_pose.speed - f);
-        else rover_pose.speed = fminf(0.0f, rover_pose.speed + f);
+        throttle_cmd += gaussian_noise() * SPEED_NOISE;
     }
 
+    float steer_cmd = steer;
     if (steer != 0.0f) {
-        rover_pose.angular_speed += (
-            (steer * ANGULAR_ACCELERATION + gaussian_noise() * ANGULAR_NOISE * ANGULAR_ACCELERATION)
-             * dt
-        );
-        rover_pose.angular_speed = fmaxf(-MAX_ANGULAR_SPEED, fminf(MAX_ANGULAR_SPEED, rover_pose.angular_speed));
-    } else {
-        float f = ANGULAR_FRICTION * dt;
-        if (fabsf(rover_pose.angular_speed) < f) rover_pose.angular_speed = 0.0f;
-        else rover_pose.angular_speed -= f * (rover_pose.angular_speed > 0.0f ? 1.0f : -1.0f);
+        steer_cmd += gaussian_noise() * ANGULAR_NOISE;
     }
 
-    rover_pose.dir_angle += rover_pose.angular_speed * dt;
-    float dx = cosf(rover_pose.dir_angle) * rover_pose.speed * dt;
-    float dz = sinf(rover_pose.dir_angle) * rover_pose.speed * dt;
-    if (!can_move_in_dir(&scene, &rover_pose.origin.x, &rover_pose.origin.z, dx, dz, ROVER_COLLISION_RADIUS)) {
-        rover_pose.speed = 0.0f;
-    }
+    step_rover_physics(&rover_pose.origin.x,
+                       &rover_pose.origin.z,
+                       &rover_pose.dir_angle,
+                       &rover_pose.speed,
+                       &rover_pose.angular_speed,
+                       throttle_cmd,
+                       steer_cmd,
+                       dt,
+                       &scene,
+                       ROVER_COLLISION_RADIUS);
 }
 
 void update_path_follower(float dt) {
@@ -382,7 +438,8 @@ void update_path_follower(float dt) {
     // skip waypoints based off projection
     float _;
     int nearest_segment;
-    project_rover_to_path_segment(rover_pose.origin.x, rover_pose.origin.z,
+    project_rover_to_path_segment(&active_path,
+                    rover_pose.origin.x, rover_pose.origin.z,
                     active_path.current, &_, &nearest_segment);
     if (nearest_segment > active_path.current) {
         active_path.current = nearest_segment;

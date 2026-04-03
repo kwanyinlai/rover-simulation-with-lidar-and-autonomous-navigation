@@ -54,10 +54,16 @@ static inline Vector3 vector3_scale(Vector3 v, float scalar) {
     return result;
 }
 
+/**
+ * @brief Compute dot product of two vectors.
+ */
 static inline float vector3_dot(Vector3 a, Vector3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+/**
+ * @brief Compute cross product of two vectors.
+ */
 static inline Vector3 vector3_cross(Vector3 a, Vector3 b) {
     Vector3 result;
     result.x = a.y * b.z - a.z * b.y;
@@ -66,10 +72,17 @@ static inline Vector3 vector3_cross(Vector3 a, Vector3 b) {
     return result;
 }
 
+/**
+ * @brief Compute Euclidean magnitude of a vector.
+ */
 static inline float vector3_magnitude(Vector3 v) {
     return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
+/**
+ * @brief Normalize a vector to unit length.
+ * @return Unit vector, or zero vector when input magnitude is zero.
+ */
 static inline Vector3 vector3_normalize(Vector3 v) {
     float mag = vector3_magnitude(v);
     if (mag == 0) return (Vector3){0, 0, 0};

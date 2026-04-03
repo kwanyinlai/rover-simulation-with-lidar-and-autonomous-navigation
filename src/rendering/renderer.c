@@ -14,7 +14,6 @@
 # include "scene/point_cloud.h"
 # include "lidar/sensor_control.h"
 # include "scene/occupancy_map.h"
-# include <string.h>
 
 
 

@@ -37,6 +37,12 @@ typedef struct {
  */
 void point_cloud_push_back(PointCloud *cloud, Vector3 position, float distance, float intensity);
 
+/**
+ * @brief Append multiple ray results into the point cloud.
+ * @param cloud Target point cloud.
+ * @param rays Ray result array.
+ * @param count Number of entries in @p rays.
+ */
 void point_cloud_push_back_multiple(PointCloud *cloud, RayResult *rays, size_t count);
 
 /**

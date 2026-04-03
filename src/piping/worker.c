@@ -3,8 +3,10 @@
 #include "lidar/raycaster.h"
 #include "lidar/sensor_control.h"
 #include "core/noise.h"
+#include "rover/rover_controller.h"
 
 #include <math.h>
+#include <string.h>
 #include <unistd.h>
 
 void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
@@ -51,5 +53,31 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
             }
         }
         write(write_fd, &ray_result_batch, sizeof(RayResultBatch));
+    }
+}
+
+void run_mppi_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
+{
+    MppiWorkerJob job;
+    while (read(read_fd, &job, sizeof(MppiWorkerJob)) > 0) {
+        MppiWorkerResult result;
+        memset(&result, 0, sizeof(result));
+        result.frame_id = job.frame_id;
+        result.start_sample_idx = job.start_sample_idx;
+        result.end_sample_idx = job.end_sample_idx;
+
+        for (int i = job.start_sample_idx; i < job.end_sample_idx; i++) {
+            const MppiEvalRequest *request = &job.request;
+            result.costs[i] = mppi_compute_rollout_cost(scene,
+                                                        &request->path_snapshot,
+                                                        request->init_state,
+                                                        request->horizon,
+                                                        request->nom_steer,
+                                                        request->nom_throttle,
+                                                        request->steer_noise[i],
+                                                        request->throttle_noise[i]);
+        }
+
+        write(write_fd, &result, sizeof(MppiWorkerResult));
     }
 }

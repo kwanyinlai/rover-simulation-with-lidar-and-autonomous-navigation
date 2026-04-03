@@ -23,6 +23,10 @@ void render_wire(void);
  */
 void render_cloud(PointCloud *cloud, float dt);
 
+/**
+ * @brief Render occupancy cells in the provided occupancy map.
+ * @param occupancy_grid_3d Occupancy map to visualize.
+ */
 void render_occupancy_map(const OccupancyMap *occupancy_grid_3d);
 
 /**

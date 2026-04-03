@@ -27,11 +27,14 @@ static float theta;
 static const float min_elev_angle = -30.0f * MATH_DEG_TO_RAD;
 static const float max_elev_angle = 89.0f * MATH_DEG_TO_RAD;
 
-int g_scan_cmd_fd = -1;
-int g_ray_batch_results_fd = -1;
+static int g_scan_cmd_fd = -1;
+static int g_ray_batch_results_fd = -1;
 
-// Generate a standard normal (mean=0, stddev=1) random value using the Box-Muller transform.
-// @see https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
+void set_scan_pipe_fds(int scan_cmd_fd, int ray_batch_results_fd)
+{
+    g_scan_cmd_fd = scan_cmd_fd;
+    g_ray_batch_results_fd = ray_batch_results_fd;
+}
 
 /* LEGACY CAST RAYS
 void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){

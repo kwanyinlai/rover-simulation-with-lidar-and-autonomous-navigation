@@ -29,6 +29,9 @@ void mouse_move(int x, int y);
  */
 void keyboard(unsigned char key, int x, int y);
 
+/**
+ * @brief Keyboard key-release event handler.
+ */
 void keyboard_up(unsigned char key, int x, int y);
 
 /**
