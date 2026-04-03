@@ -1,6 +1,7 @@
 #include "piping/method_dispatcher.h"
 #include "scene/occupancy_map.h"
 #include "lidar/lidar_sensor.h"
+#include "piping/messages.h"
 
 #include <unistd.h>
 

@@ -10,8 +10,7 @@ static float point_sq_dist_to_line_segment(float point_x,
                                            float segment_start_x,
                                            float segment_start_z,
                                            float segment_end_x,
-                                           float segment_end_z)
-{
+                                           float segment_end_z) {
     float segment_dx = segment_end_x - segment_start_x;
     float segment_dz = segment_end_z - segment_start_z;
 
@@ -63,7 +62,7 @@ int is_rover_scene_collision(const TriangleArray *scene,
 
     float rover_rad_sq = rover_rad * rover_rad;
 
-    for (int triangle_idx = 0; triangle_idx < scene->size; triangle_idx++) {
+    for (size_t triangle_idx = 0; triangle_idx < scene->size; triangle_idx++) {
         const Triangle *triangle = &(scene->data[triangle_idx]);
         Vector3 edge1 = vector3_subtract(triangle->v1, triangle->v0);
         Vector3 edge2 = vector3_subtract(triangle->v2, triangle->v0);

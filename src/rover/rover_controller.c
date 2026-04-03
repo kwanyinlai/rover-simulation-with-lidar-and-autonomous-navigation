@@ -1,17 +1,17 @@
 #ifdef __APPLE__
-#   include <OpenGL/gl3.h>
-#   include <GLUT/glut.h>
+#include <GLUT/glut.h>
 #else
-#   include <GL/glew.h>
-#   include <GL/glut.h>
+#include <GL/glut.h>
 #endif
 
 #include "rover_controller.h"
 #include "lidar/sensor_control.h"
 #include "scene/scene_collision.h"
+#include "scene/scene_state.h"
 #include "core/physics_constants.h"
 #include "core/noise.h"
 #include "core/math_utils.h"
+#include "rover/ekf_fusion.h"
 #include "rover/rover_physics.h"
 
 #include <math.h>
@@ -22,12 +22,17 @@
 #include "piping/messages.h"
 
 // https://acdelta_steerlab.github.io/mppi-generic-website/docs/mppi.html
+// https://dilithjay.com/blog/mppi 
 // MPPI Controller -- Model Predictive Path Integral
 
 // MPPI hyperparameters
-// #define MPPI_SAMPLES 32 // parallel rollouts per frame
-// #define MPPI_HORIZON 24 // steps per rollout
+
 // defined partially in rover_controller.h
+/*
+#define MPPI_SAMPLES 32 // parallel rollouts per frame
+#define MPPI_HORIZON 24 // steps per rollout
+*/
+
 #define MPPI_DT 0.05f // rollout timestep
 #define MPPI_LAMBDA 0.5f // temperature (0 = greedy, inf = uniform random)
 
@@ -50,14 +55,6 @@ static inline float clamp_throttle(float throttle) {
     return fmaxf(THROTTLE_MIN, fminf(THROTTLE_MAX, throttle));
 }
 
-// waypoints
-#define WAYPOINT_REACH_DIST 0.5f
-#define WAYPOINT_REACH_THRESHOLD (WAYPOINT_REACH_DIST * WAYPOINT_REACH_DIST)
-
-// odometry noise
-#define SPEED_NOISE 0.0f
-#define ANGULAR_NOISE 0.0f
-
 // for rendering predictions
 #define PREDICTION_STEPS MPPI_HORIZON
 #define PREDICTION_DT MPPI_DT
@@ -70,9 +67,11 @@ RoverMode rover_mode = MODE_AUTO;
 
 static int require_replan_write_fd = -1;
 static int replan_request_sent = 0;
-static int mppi_cmd_write_fd = -1;
-static int mppi_result_read_fd = -1;
+static int rollout_cmd_write_fd = -1;
+static int rollout_result_read_fd = -1;
 static int mppi_frame_id = 0;
+// EKF integration is temporarily disabled.
+// static KalmanFilter g_pose_ekf;
 
 // nominal steer and throttle, warm started with previous frame'sim_state optimal
 static float nom_steer[MPPI_HORIZON];
@@ -94,19 +93,47 @@ static float trajectory_cost[MPPI_SAMPLES];
 #define W_TERMINAL_HEADING 2.0f // terminal cost to penalise ending with heading error
 
 
+// waypoints
+#define WAYPOINT_REACH_DIST 1.0f
+#define WAYPOINT_REACH_THRESHOLD (WAYPOINT_REACH_DIST * WAYPOINT_REACH_DIST)
 
-// segments to look back or forth from
+static void advance_waypoint_by_proximity(const Path *path,
+                                          int *wp_idx,
+                                          float rover_x,
+                                          float rover_z,
+                                          int max_idx) {
+                                            
+    if (!path || !wp_idx || path->count <= 0) {
+        return;
+    }
+
+    int upper_bound = max_idx;
+    if (upper_bound > path->count) {
+        upper_bound = path->count;
+    }
+
+    while (*wp_idx < upper_bound) {
+        const Waypoint *waypoint = &path->waypoints[*wp_idx];
+        float dx = waypoint->x - rover_x;
+        float dz = waypoint->z - rover_z;
+        if (dx * dx + dz * dz < WAYPOINT_REACH_THRESHOLD) {
+            (*wp_idx)++;
+        } else {
+            break;
+        }
+    }
+}
+
 // TODO: tune, or maybe define these relative to number waypoints generated
 #define LOOK_BACK 2
 #define LOOK_AHEAD 6
-
 // Returns cross-track error, and outputs nearest path tangent angle and index of nearest line segment in path
 static float project_rover_to_path_segment(const Path *path,
                                            float rover_x,
                                            float rover_z,
                                            int waypoint_hint,
-                                           float *dir_angle_out, int *nearest_line_seg_out)
-{
+                                           float *dir_angle_out, 
+                                           int *nearest_line_seg_out) {
     // waypoint hint to maintain path continuity
     float best_sqr_dist = FLT_MAX;
     float cross_track_error = 0.0f;
@@ -204,14 +231,11 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
         float steer_cmd = clamp_steer(nom_steer_seq[j] + steer_noise_seq[j]);
         float throttle_cmd = clamp_throttle(nom_throttle_seq[j] + throttle_noise_seq[j]);
 
-        while (sim_state.wp_idx < path->count - 1) {
-            float waypoint_dx = path->waypoints[sim_state.wp_idx].x - sim_state.x;
-            float waypoint_dz = path->waypoints[sim_state.wp_idx].z - sim_state.z;
-            if (waypoint_dx * waypoint_dx + waypoint_dz * waypoint_dz < WAYPOINT_REACH_THRESHOLD) {
-                sim_state.wp_idx++;
-            } 
-            else break;
-        }
+        advance_waypoint_by_proximity(path,
+                                      &sim_state.wp_idx,
+                                      sim_state.x,
+                                      sim_state.z,
+                                      path->count - 1);
 
         float path_heading;
         int nearest_segment;
@@ -267,11 +291,10 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
 }
 
 
-// TODO
-void set_mppi_pipe_fds(int cmd_write_fd, int result_read_fd)
+void set_rollout_pipe_fds(int cmd_write_fd, int result_read_fd)
 {
-    mppi_cmd_write_fd = cmd_write_fd;
-    mppi_result_read_fd = result_read_fd;
+    rollout_cmd_write_fd = cmd_write_fd;
+    rollout_result_read_fd = result_read_fd;
 }
 
 void set_replan_pipe_fd(int write_fd)
@@ -281,11 +304,11 @@ void set_replan_pipe_fd(int write_fd)
 
 static int evaluate_rollouts_via_pipe(void)
 {
-    if (mppi_cmd_write_fd < 0 || mppi_result_read_fd < 0) {
+    if (rollout_cmd_write_fd < 0 || rollout_result_read_fd < 0) {
         return 0;
     }
 
-    MppiEvalRequest request;
+    RolloutRequest request;
     memset(&request, 0, sizeof(request));
     request.frame_id = mppi_frame_id++;
     request.sample_count = MPPI_SAMPLES;
@@ -304,12 +327,12 @@ static int evaluate_rollouts_via_pipe(void)
     memcpy(request.steer_noise, steer_noise, sizeof(steer_noise));
     memcpy(request.throttle_noise, throttle_noise, sizeof(throttle_noise));
 
-    if (write(mppi_cmd_write_fd, &request, sizeof(MppiEvalRequest)) != sizeof(MppiEvalRequest)) {
+    if (write(rollout_cmd_write_fd, &request, sizeof(RolloutRequest)) != sizeof(RolloutRequest)) {
         return 0;
     }
 
-    MppiEvalResult result;
-    if (read(mppi_result_read_fd, &result, sizeof(MppiEvalResult)) != sizeof(MppiEvalResult)) {
+    BatchedRolloutResult result;
+    if (read(rollout_result_read_fd, &result, sizeof(BatchedRolloutResult)) != sizeof(BatchedRolloutResult)) {
         return 0;
     }
 
@@ -317,8 +340,6 @@ static int evaluate_rollouts_via_pipe(void)
     return 1;
 }
 
-
-// ── MPPI optimisation step ────────────────────────────────────────────────────
 
 static void mppi_update(void){
     for (int i = 0; i < MPPI_SAMPLES; i++) {
@@ -395,6 +416,8 @@ void init_rover_controller(void) {
     for (int i = 0; i < MPPI_HORIZON; i++){
         nom_throttle[i] = 0.35f;
     }
+
+    // ekf_fusion_init(&g_pose_ekf, &rover_pose);
 }
 
 void update_odometry(float dt) {
@@ -411,23 +434,43 @@ void update_odometry(float dt) {
         steer_cmd += gaussian_noise() * ANGULAR_NOISE;
     }
 
-    step_rover_physics(&rover_pose.origin.x,
-                       &rover_pose.origin.z,
-                       &rover_pose.dir_angle,
-                       &rover_pose.speed,
-                       &rover_pose.angular_speed,
+    SensorState odom_prediction = rover_pose;
+    step_rover_physics(&odom_prediction.origin.x,
+                       &odom_prediction.origin.z,
+                       &odom_prediction.dir_angle,
+                       &odom_prediction.speed,
+                       &odom_prediction.angular_speed,
                        throttle_cmd,
                        steer_cmd,
                        dt,
                        &scene,
                        ROVER_COLLISION_RADIUS);
+
+    // ekf_fusion_predict_from_odometry(&g_pose_ekf, &odom_prediction);
+    // const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
+    // if (fused_state) {
+    //     rover_pose = *fused_state;
+    // } else {
+    //     rover_pose = odom_prediction;
+    // }
+    rover_pose = odom_prediction;
+}
+
+void update_lidar_fusion(const PointCloud *cloud, float scan_theta) {
+    // ekf_fusion_update_from_lidar(&g_pose_ekf, cloud, scan_theta);
+    // const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
+    // if (fused_state) {
+    //     rover_pose = *fused_state;
+    // }
+    (void)cloud;
+    (void)scan_theta;
 }
 
 void update_path_follower(float dt) {
+    (void) dt; // dt is currently unused but might be needed in the future
     if (active_path.current >= active_path.count) {
         if (!replan_request_sent && require_replan_write_fd >= 0) {
-            const SensorState *state = get_sensor_state();
-            write(require_replan_write_fd, state, sizeof(SensorState));
+            write(require_replan_write_fd, &rover_pose, sizeof(SensorState));
             replan_request_sent = 1;
         }
         set_throttle(0.0f);
@@ -446,15 +489,14 @@ void update_path_follower(float dt) {
     }
 
     // proximity check (non-projection)
-    while (active_path.current < active_path.count) {
-        const Waypoint *target_waypoint = &active_path.waypoints[active_path.current];
-        float dx = target_waypoint->x - rover_pose.origin.x;
-        float dz = target_waypoint->z - rover_pose.origin.z;
-        if (dx * dx + dz * dz < WAYPOINT_REACH_THRESHOLD) {
-            printf("Waypoint %d reached\n", active_path.current);
-            active_path.current++;
-        } 
-        else break;
+    int prev_waypoint_idx = active_path.current;
+    advance_waypoint_by_proximity(&active_path,
+                                  &active_path.current,
+                                  rover_pose.origin.x,
+                                  rover_pose.origin.z,
+                                  active_path.count);
+    if (active_path.current > prev_waypoint_idx) {
+        printf("Waypoint %d reached\n", active_path.current - 1);
     }
 
     if (active_path.current >= active_path.count) {
@@ -524,11 +566,11 @@ void render_predicted_path(void)
 
     for (int i = 0; i < PREDICTION_STEPS; i++) {
         if (sim_state.wp_idx >= active_path.count) break;
-        // advance waypoints for rollout
-        const Waypoint *waypoint = &active_path.waypoints[sim_state.wp_idx];
-        float ddx = waypoint->x - sim_state.x;
-        float ddz = waypoint->z - sim_state.z;
-        if (ddx * ddx + ddz * ddz < WAYPOINT_REACH_THRESHOLD) sim_state.wp_idx++;
+        advance_waypoint_by_proximity(&active_path,
+                          &sim_state.wp_idx,
+                          sim_state.x,
+                          sim_state.z,
+                          active_path.count);
 
         rollout_simulation(&sim_state, nom_throttle[i], nom_steer[i], PREDICTION_DT);
         

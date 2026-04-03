@@ -11,7 +11,7 @@ void triangle_array_init(TriangleArray *scene) {
 
 void triangle_array_push_back(TriangleArray *scene, Triangle triangle) {
     if (scene->size >= scene->capacity) {
-        size_t new_capacity = scene->capacity == 0 ? INIT_SIZE : scene->capacity * 2;
+        int new_capacity = scene->capacity == 0 ? INIT_SIZE : scene->capacity * 2;
         Triangle *new_data = realloc(scene->data, new_capacity * sizeof(Triangle));
         if (new_data == NULL) {
             fprintf(stderr, "Failed to allocate memory for TriangleArray\n");
@@ -43,6 +43,8 @@ void mesh_add_triangle(TriangleArray *scene, Vector3 v0, Vector3 v1, Vector3 v2)
 }
 
 void mesh_add_quad_tesselated(TriangleArray *scene, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, int divs) {
+    (void) v2; // v2 is unneeded because we can infer it from v0, v1, v3
+    // we are keeping it just for consistency and readability
     for (int i = 0; i < divs; i++) {
         float t0 = (float)i / divs;
         float t1 = (float)(i + 1) / divs;
@@ -122,10 +124,8 @@ void build_floor(TriangleArray *scene){
     );
 }
 
-void height_map(TriangleArray *scene, int min_x, int max_x, int min_z, int max_z, int grid_resolution){
-    float height_map[grid_resolution][grid_resolution];
-    
-}
+
+
 
 
 

@@ -1,12 +1,11 @@
 #include "piping/method_dispatcher.h"
 #include "scene/frontier_projection.h"
 #include "lidar/sensor_control.h"
+#include "rover/rover_controller.h"
 
 #include <stdlib.h>
 #include <sys/select.h>
 #include <unistd.h>
-
-#define ROVER_HEIGHT_CELLS 3
 
 
 void run_frontier_analyzer_loop(int voxel_update_read_fd,
@@ -41,6 +40,8 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
             if (read(rover_pose_read_fd, &latest_rover_state, sizeof(SensorState)) <= 0) {
                 break;
             }
+            // This is an artifact of autonomous navigation which is not yet implemented yet
+            (void) frontier_write_fd;
             /*
             Waypoint waypoints[MAX_WAYPOINTS];
             int waypoint_count = plan_frontier_path(

@@ -1,11 +1,3 @@
-
-/**
- * @file raycaster.h
- * @brief Raycasting interface for lidar simulation.
- *
- * Provides functions for casting rays into a scene and detecting intersections for lidar point cloud generation.
- */
-
 #ifndef RAYCASTER_H
 #define RAYCASTER_H
 
@@ -23,10 +15,10 @@
  * @return Hit distance in world units, or a non-positive value if no hit occurs.
  */
 float cast_ray(const TriangleArray *scene, 
-    const Vector3 *origin, 
-    const Vector3 direction, 
-    Vector3 *hit,
-    float *intensity
+               const Vector3 *origin, 
+               const Vector3 direction, 
+               Vector3 *hit,
+               float *intensity
 );
 
 #endif // RAYCASTER_H

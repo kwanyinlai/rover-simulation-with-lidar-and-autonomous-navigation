@@ -1,33 +1,31 @@
 
 
 # ifdef __APPLE__
-#   include <OpenGL/gl3.h>
-#   include <GLUT/glut.h>
+#include <GLUT/glut.h>
 # else
-#   include <GL/glew.h>
-#   include <GL/glut.h>
+#include <GL/glut.h>
 # endif
 
-# include "core/vec3.h"
-# include "rendering/scene.h"
-# include "scene/scene_state.h"
-# include "scene/point_cloud.h"
-# include "lidar/sensor_control.h"
-# include "scene/occupancy_map.h"
+#include "core/vec3.h"
+#include "rendering/scene.h"
+#include "scene/scene_state.h"
+#include "scene/point_cloud.h"
+#include "lidar/sensor_control.h"
+#include "scene/occupancy_map.h"
 
 
 
-# define DECAY_RATE 0.50f
+#define DECAY_RATE 0.50f
 
-# define VERTICES_PER_VOXEL 24 // 12 edges * 2 vertices per edge
-# define FLOATS_PER_VERTEX 7 // x, y, z, r, g, b, alpha
+#define VERTICES_PER_VOXEL 24 // 12 edges * 2 vertices per edge
+#define FLOATS_PER_VERTEX 7 // x, y, z, r, g, b, alpha
 
-# define MAX_VISIBLE_VOXELS 1000000
+#define MAX_VISIBLE_VOXELS 1000000
 
 void render_wire(void){
     glLineWidth(0.4f);
     glColor3f(0.15f, 0.15f, 0.18f);
-    for(int i = 0 ; i < scene.size; i++){
+    for(size_t i = 0 ; i < scene.size; i++){
         Triangle *t = &(scene.data[i]);
         glBegin(GL_LINE_LOOP);
         glVertex3f(t->v0.x, t->v0.y, t->v0.z);
@@ -38,6 +36,7 @@ void render_wire(void){
 }
 
 void render_cloud(PointCloud *cloud, float dt){
+    (void) dt; // used for ageing if wanted
     // point_cloud_age(cloud, dt); 
     // disabling fading for now, but can enable by uncommenting above line, and changing alpha calculation below to use age.
     glBegin(GL_POINTS);
@@ -49,7 +48,7 @@ void render_cloud(PointCloud *cloud, float dt){
 
     float y_min = 0.0f;
     float y_max = 6.0f;
-    for (size_t i = 0; i < cloud->size; i++) {
+    for (int i = 0; i < cloud->size; i++) {
         float t = (cloud->data[i].position.y - y_min) / (y_max - y_min);
         t = fmaxf(0.0f, fminf(t, 1.0f));  // clamp so stops[] index never goes OOB
 

@@ -1,9 +1,9 @@
-# include <float.h> // for FLT_MAX
-# include "scene/occupancy_map.h"
-# include "lidar/lidar_sensor.h"
-# include <sys/mman.h>
-# include <unistd.h>
-# include "rover/rover_controller.h"
+#include <float.h> // for FLT_MAX
+#include "scene/occupancy_map.h"
+#include "lidar/lidar_sensor.h"
+#include <sys/mman.h>
+#include <unistd.h>
+#include "rover/rover_controller.h"
 
 
 #define HIT_LOG_ODDS 6.0f
@@ -17,7 +17,7 @@ void init_occupancy_map(OccupancyMap *occupancy_grid_3d, int width, int height, 
     occupancy_grid_3d->depth = depth;
     occupancy_grid_3d->cell_size = cell_size;
     occupancy_grid_3d->origin = origin;
-    size_t total_cells = (size_t)width * height * depth;
+    int total_cells = (int)width * height * depth;
     // use mmap for shared memory between processes
     occupancy_grid_3d->data = mmap(NULL, total_cells * sizeof(float), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (occupancy_grid_3d->data == MAP_FAILED) {
@@ -27,7 +27,7 @@ void init_occupancy_map(OccupancyMap *occupancy_grid_3d, int width, int height, 
 }
 
 void free_occupancy_map(OccupancyMap *occupancy_grid_3d){
-    munmap(occupancy_grid_3d->data, (size_t)occupancy_grid_3d->width * occupancy_grid_3d->height * occupancy_grid_3d->depth * sizeof(float));
+    munmap(occupancy_grid_3d->data, (int)occupancy_grid_3d->width * occupancy_grid_3d->height * occupancy_grid_3d->depth * sizeof(float));
     occupancy_grid_3d->data = NULL;
     occupancy_grid_3d->width = 0;
     occupancy_grid_3d->height = 0;

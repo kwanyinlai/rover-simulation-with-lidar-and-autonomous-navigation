@@ -1,20 +1,16 @@
-
-# include "core/vec3.h"
-# include "lidar/raycaster.h"
-# include <math.h>
-# include <stdlib.h>
-# include "scene/point_cloud.h"
-# include "scene/occupancy_map.h"
-# include "scene/scene_collision.h"
-# include "lidar/lidar_sensor.h"
-# include "rover/rover_physics.h"
+#include <math.h>
+#include "lidar/lidar_sensor.h"
+#include "rover/rover_physics.h"
+#include "scene/scene_collision.h"
+#include "scene/scene_state.h"
 
 
 
 static SensorState ss;
 
-static float throttle; // -1, 0 or 1, for backward and forward
-static float steer; // -1, 0 or 1, for left and right'
+// Control inputs are clamped to [-1, 1].
+static float throttle;
+static float steer;
 
 void init_sensor_state(void){
    
@@ -56,9 +52,11 @@ float get_sensor_velocity(void) {
     return ss.speed;
 }
 
-void rover_control(float dt){
+void rover_control(float dt) {
     // simple physics for smooth acceleration and turning
     // printf("Throttle: %.2f, Steer: %.2f\n", throttle, steer);
+    // annoyingly passing in manually because incompatible SimState and SensorState
+    // where is polymorphism when you need it :((
     step_rover_physics(&ss.origin.x,
                        &ss.origin.z,
                        &ss.dir_angle,
@@ -70,8 +68,6 @@ void rover_control(float dt){
                        &scene,
                        ROVER_COLLISION_RADIUS);
     
-    // ss.dir_angle += ss.angular_speed * dt; // TODO: rotate lidar as well? maybe we don't want this though
-    // // even if it is more physically acurate
 }
 
 const SensorState *get_sensor_state(void) {

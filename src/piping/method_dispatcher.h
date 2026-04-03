@@ -1,9 +1,9 @@
 
 # ifndef METHOD_DISPATCHER_H
-# define METHOD_DISPATCHER_H
+#define METHOD_DISPATCHER_H
 
-# include "rendering/scene.h"
-# include "scene/occupancy_map.h"
+#include "rendering/scene.h"
+#include "scene/occupancy_map.h"
 
 /**
  * @brief Run occupancy updater process loop.
@@ -25,15 +25,15 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray*);
 /**
  * @brief Run MPPI coordinator loop that shards rollout work across workers.
  */
-void run_mppi_coordinator_loop(int mppi_cmd_read_fd,
-                               int mppi_result_write_fd,
-                               int mppi_task_pipes[NUM_WORKERS][2],
-                               int mppi_result_pipes[NUM_WORKERS][2]);
+void run_rollout_coordinator_loop(int rollout_cmd_read_fd,
+                                  int rollout_result_write_fd,
+                                  int rollout_task_pipes[NUM_WORKERS][2],
+                                  int rollout_costs_pipes[NUM_WORKERS][2]);
 
 /**
  * @brief Run MPPI rollout worker loop.
  */
-void run_mppi_worker_loop(int read_fd, int write_fd, TriangleArray *scene);
+void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene);
 
 /**
  * @brief Run frontier analysis process loop.

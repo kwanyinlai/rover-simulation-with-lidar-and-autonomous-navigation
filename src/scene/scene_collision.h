@@ -6,8 +6,6 @@
 
 #define ROVER_COLLISION_RADIUS 0.35f
 
-extern TriangleArray scene;
-
 /**
  * @brief Test whether a rover footprint intersects obstacle geometry at a position.
  * @param scene Collision scene.

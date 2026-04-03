@@ -1,10 +1,11 @@
 #ifdef __APPLE__
-#  include <GLUT/glut.h>
+#include <GLUT/glut.h>
 #else
-#  include <GL/glut.h>
+#include <GL/glut.h>
 #endif
 
 #include <math.h>
+#include "core/physics_constants.h"
 #include "core/vec3.h"
 #include "rendering/scene.h"
 #include "rendering/renderer.h"
@@ -12,8 +13,6 @@
 #include "lidar/sensor_control.h"
 #include "rover/rover_controller.h"
 
-
-#define MATH_DEG_TO_RAD (M_PI / 180.0f)
 #define CAMERA_MIN_PHI 2.f
 #define CAMERA_MAX_PHI 89.f
 #define CAMERA_ROTATE_SENSITIVITY 0.5f
@@ -49,6 +48,7 @@ static void sync_pause_state(void) {
 }
 
 extern RoverMode rover_mode;
+extern void handle_sigint(int sig);
 
 void apply_camera(void) {
     glMatrixMode(GL_MODELVIEW);
@@ -64,9 +64,10 @@ void apply_camera(void) {
 }
 
 void keyboard(unsigned char key, int x, int y) {
+    (void) x; // unused but required by glutKeyboardFunc signature
+    (void) y; // unused but required by glutKeyboardFunc signature
     switch (key) {
         case 27:
-            extern void handle_sigint(int);
             handle_sigint(0);
             break;
         case 't':
@@ -129,6 +130,8 @@ void keyboard(unsigned char key, int x, int y) {
 }
 
 void keyboard_up(unsigned char key, int x, int y) {
+    (void) x; // unused but required by glutKeyboardFunc signature
+    (void) y; // unused but required by glutKeyboardFunc signature
     switch(key) {
         case 'w': case 'W':
         case 's': case 'S':

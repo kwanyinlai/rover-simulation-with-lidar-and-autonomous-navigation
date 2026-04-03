@@ -1,42 +1,16 @@
-# ifndef ROVER_CONTROLLER_H
-# define ROVER_CONTROLLER_H
+#ifndef ROVER_CONTROLLER_H
+#define ROVER_CONTROLLER_H
 
-# define MAX_WAYPOINTS 10
+#define ROVER_HEIGHT_CELLS 3
 
-# define KP 0.8f
-# define KD 0.6f
+// odometry noise
+#define SPEED_NOISE 0.0f
+#define ANGULAR_NOISE 0.0f
 
-# define ROVER_HEIGHT_CELLS 3
-
-// MPPI hyperparameters
-# define MPPI_SAMPLES 32
-# define MPPI_HORIZON 24
 
 #include "rendering/scene.h"
+#include "scene/point_cloud.h"
 
-
-typedef struct {
-    int x, z;
-} Waypoint;
-
-typedef struct {
-    Waypoint waypoints[MAX_WAYPOINTS];
-    int count;
-    int current;
-} Path;
-
-typedef enum {
-    MODE_MANUAL,
-    MODE_AUTO
-} RoverMode;
-
-typedef struct {
-    float x, z;
-    float dir_angle;
-    float speed;
-    float angular_speed;
-    int wp_idx;
-} SimState;
 
 /**
  * @brief Currently active rover waypoint path.
@@ -59,7 +33,7 @@ void set_replan_pipe_fd(int write_fd);
  * @param cmd_write_fd Write descriptor for rollout requests.
  * @param result_read_fd Read descriptor for rollout cost results.
  */
-void set_mppi_pipe_fds(int cmd_write_fd, int result_read_fd);
+void set_rollout_pipe_fds(int cmd_write_fd, int result_read_fd);
 
 /**
  * @brief Compute MPPI rollout cost for one control/noise sequence.
@@ -87,6 +61,13 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
  * @param dt Simulation time step in seconds.
  */
 void update_odometry(float dt);
+
+/**
+ * @brief Update fused rover pose estimate with latest lidar scan evidence.
+ * @param cloud Current point cloud buffer.
+ * @param scan_theta Current horizontal scan angle in radians.
+ */
+void update_lidar_fusion(const PointCloud *cloud, float scan_theta);
 
 /**
  * @brief Run path-following control update and emit throttle/steer commands.

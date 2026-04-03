@@ -1,5 +1,6 @@
 #include "piping/method_dispatcher.h"
 #include "piping/messages.h"
+#include "lidar/lidar_sensor.h"
 #include "lidar/raycaster.h"
 #include "lidar/sensor_control.h"
 #include "core/noise.h"
@@ -10,7 +11,6 @@
 #include <unistd.h>
 
 void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
-    extern float elevations[NUM_RINGS];
     const float noise_factor = 0.01f;
     RayResultBatch ray_result_batch;
     RayBatch ray_batch;
@@ -56,18 +56,18 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
     }
 }
 
-void run_mppi_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
+void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
 {
-    MppiWorkerJob job;
-    while (read(read_fd, &job, sizeof(MppiWorkerJob)) > 0) {
-        MppiWorkerResult result;
+    RolloutJob job;
+    while (read(read_fd, &job, sizeof(RolloutJob)) > 0) {
+        RolloutResult result;
         memset(&result, 0, sizeof(result));
         result.frame_id = job.frame_id;
         result.start_sample_idx = job.start_sample_idx;
         result.end_sample_idx = job.end_sample_idx;
 
         for (int i = job.start_sample_idx; i < job.end_sample_idx; i++) {
-            const MppiEvalRequest *request = &job.request;
+            const RolloutRequest *request = &job.request;
             result.costs[i] = mppi_compute_rollout_cost(scene,
                                                         &request->path_snapshot,
                                                         request->init_state,
@@ -78,6 +78,6 @@ void run_mppi_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
                                                         request->throttle_noise[i]);
         }
 
-        write(write_fd, &result, sizeof(MppiWorkerResult));
+        write(write_fd, &result, sizeof(RolloutResult));
     }
 }

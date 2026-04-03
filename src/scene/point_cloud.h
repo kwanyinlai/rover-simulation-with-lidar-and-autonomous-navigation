@@ -11,7 +11,7 @@
 
 #include "core/vec3.h"
 
-# include "piping/messages.h"
+#include "piping/messages.h"
 
 /**
  * @brief Single point entry in the point cloud.
@@ -28,8 +28,8 @@ typedef struct {
  */
 typedef struct {
     PointCloudEntry *data;
-    size_t size;
-    size_t capacity;
+    int size;
+    int capacity;
 } PointCloud;
 
 /**
@@ -43,7 +43,7 @@ void point_cloud_push_back(PointCloud *cloud, Vector3 position, float distance, 
  * @param rays Ray result array.
  * @param count Number of entries in @p rays.
  */
-void point_cloud_push_back_multiple(PointCloud *cloud, RayResult *rays, size_t count);
+void point_cloud_push_back_multiple(PointCloud *pc, const RayResult *rays, int count);
 
 /**
  * @brief Free memory used by the point cloud.

@@ -2,19 +2,48 @@
 #ifndef MESSAGES_H
 #define MESSAGES_H
 
-# include "core/vec3.h"
-# include "rover/rover_controller.h"
+#include "core/vec3.h"
+#define MAX_WAYPOINTS 10
 
 
-# define MAX_UPDATED_VOXELS 4028
-# define NUM_WORKERS 4
-# define NUM_RINGS 256
+#define MAX_UPDATED_VOXELS 4028
+#define NUM_WORKERS 4
+#define NUM_RINGS 256
+
+// MPPI hyperparameters
+#define MPPI_SAMPLES 32
+#define MPPI_HORIZON 24
 
 typedef enum {
     UNKNOWN = 0,
     FREE = 1,
     OCCUPIED = 2
 } CELL_STATE;
+
+typedef struct {
+    int x, z;
+} Waypoint;
+
+typedef struct {
+    Waypoint waypoints[MAX_WAYPOINTS];
+    int count;
+    int current;
+} Path;
+
+typedef enum {
+    MODE_MANUAL,
+    MODE_AUTO
+} RoverMode;
+
+typedef struct {
+    float x, z;
+    float dir_angle;
+    float speed;
+    float angular_speed;
+    int wp_idx;
+} SimState;
+
+
 typedef struct {
     float theta;
     float max_elev;
@@ -73,31 +102,26 @@ typedef struct {
     float nom_throttle[MPPI_HORIZON];
     float steer_noise[MPPI_SAMPLES][MPPI_HORIZON];
     float throttle_noise[MPPI_SAMPLES][MPPI_HORIZON];
-} MppiEvalRequest;
+} RolloutRequest;
 
 typedef struct {
     int frame_id;
     int start_sample_idx;
     int end_sample_idx;
-    MppiEvalRequest request;
-} MppiWorkerJob;
+    RolloutRequest request;
+} RolloutJob;
 
 typedef struct {
     int frame_id;
     int start_sample_idx;
     int end_sample_idx;
     float costs[MPPI_SAMPLES];
-} MppiWorkerResult;
+} RolloutResult;
 
 typedef struct {
     int frame_id;
     float costs[MPPI_SAMPLES];
-} MppiEvalResult;
-
-
-// TODO: some frontier message
-
-
+} BatchedRolloutResult;
 
 
 #endif // MESSAGES_H

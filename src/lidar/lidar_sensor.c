@@ -1,37 +1,32 @@
-# include "core/vec3.h"
-# include "lidar/raycaster.h"
-# include <math.h>
-# include <stdlib.h>
-# include "core/noise.h"
-# include "scene/point_cloud.h"
-# include "scene/occupancy_map.h"
-# include "lidar/lidar_sensor.h"
-# include "lidar/sensor_control.h"
-# include "piping/messages.h"
-# include <stdio.h>
-# include <unistd.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "core/noise.h"
+#include "core/physics_constants.h"
+#include "lidar/lidar_sensor.h"
+#include "lidar/raycaster.h"
+#include "lidar/sensor_control.h"
+#include "piping/messages.h"
+#include "scene/occupancy_map.h"
+#include "scene/point_cloud.h"
+
+#define STEP 0.02f
+
+float elevations[NUM_RINGS];
 
 
-
-# define MAX_SPEED 5.0f
-# define MAX_ANGULAR_SPEED (120.0f * MATH_DEG_TO_RAD)
-# define ACCELERATION 3.0f
-# define ANGULAR_ACCELERATION (150.0f * MATH_DEG_TO_RAD)
-# define FRICTION 2.f
-# define ANGULAR_FRICTION (130.0f * MATH_DEG_TO_RAD)
-# define STEP 0.02f
-
-
-static float theta;
- // measured as angle from X-Z plane, = MATH_PI / 2 - polar
 static const float min_elev_angle = -30.0f * MATH_DEG_TO_RAD;
 static const float max_elev_angle = 89.0f * MATH_DEG_TO_RAD;
+
+// Measured as angle from the X-Z plane.
+static float theta;
 
 static int g_scan_cmd_fd = -1;
 static int g_ray_batch_results_fd = -1;
 
-void set_scan_pipe_fds(int scan_cmd_fd, int ray_batch_results_fd)
-{
+void set_scan_pipe_fds(int scan_cmd_fd, int ray_batch_results_fd) {
     g_scan_cmd_fd = scan_cmd_fd;
     g_ray_batch_results_fd = ray_batch_results_fd;
 }
@@ -76,18 +71,27 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
 }
 */
 
-void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){
+void cast_all_rays(const TriangleArray *scene, 
+                   PointCloud *point_cloud,
+                   OccupancyMap *occupancy_grid_3d) {
+    
+    (void) scene; 
+    (void) occupancy_grid_3d;
+    // unused but kept to support backwards compatabiliy with legacy raycasting with no
+    // multiprocessing
+
     ScanRequest scan_request = {
         .theta = theta,
         .max_elev = max_elev_angle,
         .min_elev = min_elev_angle,
         .num_rings = NUM_RINGS
     };
+
     get_sensor_pos(&scan_request.origin);
     write(g_scan_cmd_fd, &scan_request, sizeof(ScanRequest));
     RayResultBatch ray_result_batch;
     for (int i = 0; i < NUM_WORKERS; i++) {
-        ssize_t n = read(g_ray_batch_results_fd, &ray_result_batch, sizeof(RayResultBatch));
+        int n = read(g_ray_batch_results_fd, &ray_result_batch, sizeof(RayResultBatch));
         if (n == sizeof(RayResultBatch)) {
             for (int j = 0; j < ray_result_batch.count; j++) {
                 RayResult *r = &ray_result_batch.rays[j];
@@ -99,12 +103,19 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
     }
 }
 
-void sensor_step(const TriangleArray *scene, PointCloud *point_cloud, OccupancyMap *occupancy_grid_3d){
+void sensor_step(const TriangleArray *scene,
+                 PointCloud *point_cloud, 
+                 OccupancyMap *occupancy_grid_3d) {
+
     theta += STEP;
     cast_all_rays(scene, point_cloud, occupancy_grid_3d);
 }
 
-void init_sensor_rays(void){
+float get_scan_theta(void) {
+    return theta;
+}
+
+void init_sensor_rays(void) {
     for (int i = 0 ; i < NUM_RINGS ; i++){
         elevations[i] = min_elev_angle +
           i * (max_elev_angle - min_elev_angle) / NUM_RINGS;

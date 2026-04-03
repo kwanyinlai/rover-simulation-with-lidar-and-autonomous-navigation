@@ -1,17 +1,12 @@
-/*
-    * main.c
-    *
-    *  Created on: 4th March 2026
-*/
-
 #ifdef __APPLE__
-#  include <GLUT/glut.h>
+#include <GLUT/glut.h>
 #else
-#  include <GL/glut.h>
+#include <GL/glut.h>
 #endif
 
 #include <stdio.h>
-# include <unistd.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "core/vec3.h"
 #include "rendering/scene.h"
 #include "scene/scene_state.h"
@@ -30,7 +25,6 @@ PointCloud cloud;
 OccupancyMap occupancy_grid_3d;
 OccupancyMap occupancy_grid_2d;
 
-
 static float last_time = 0.0f;
 extern int is_render_scene;
 extern int is_paused;
@@ -45,28 +39,33 @@ extern RoverMode rover_mode;
 
 // signal handler for handling forks
 static int scan_coord_pid = -1;
-static int mppi_coord_pid = -1;
-static int updated_voxels_pipe_rd = -1; // pipe for receiving updated voxels from occupancy updater process
+static int rollout_coord_pid = -1;
+// static int updated_voxels_pipe_rd = -1; // pipe for receiving updated voxels from occupancy updater process
 static int frontier_waypoints_read_fd = -1;
 
-static void sigterm_handler(int sig) { exit(0); }
+static void sigterm_handler(int sig) {
+    (void)sig;
+    exit(0);
+}
 
 void handle_sigint(int sig) {
+    (void)sig;
     if (scan_coord_pid > 0) {
         kill(scan_coord_pid, SIGTERM);
         waitpid(scan_coord_pid, NULL, 0);
     }
-    if (mppi_coord_pid > 0) {
-        kill(mppi_coord_pid, SIGTERM);
-        waitpid(mppi_coord_pid, NULL, 0);
+    if (rollout_coord_pid > 0) {
+        kill(rollout_coord_pid, SIGTERM);
+        waitpid(rollout_coord_pid, NULL, 0);
     }
     exit(0);
 }
 
 // store worker ids to kill before terminating coordinator
 static int worker_pids[NUM_WORKERS] = {0};
-static int mppi_worker_pids[NUM_WORKERS] = {0};
+static int rollout_workers_pid[NUM_WORKERS] = {0};
 static void coordinator_sigterm(int sig) {
+    (void)sig;
     for (int i = 0; i < NUM_WORKERS; i++) {
         if (worker_pids[i] > 0) {
             kill(worker_pids[i], SIGTERM);
@@ -76,16 +75,30 @@ static void coordinator_sigterm(int sig) {
     exit(0);
 }
 
-static void mppi_coordinator_sigterm(int sig) {
+static void rollout_coordinator_sigterm(int sig) {
+    (void)sig;
     for (int i = 0; i < NUM_WORKERS; i++) {
-        if (mppi_worker_pids[i] > 0) {
-            kill(mppi_worker_pids[i], SIGTERM);
-            waitpid(mppi_worker_pids[i], NULL, 0);
+        if (rollout_workers_pid[i] > 0) {
+            kill(rollout_workers_pid[i], SIGTERM);
+            waitpid(rollout_workers_pid[i], NULL, 0);
         }
     }
     exit(0);
 }
 
+// TODO: this is redundant right now because the frontier analyzer does not assign
+// waypoints based on frontier points. This will not be complted for the project
+// but is intended to be for extensibility when frontier-based exploration is fully
+// implemented. For now, only artifacts of this infrastructure exist.
+
+// Several bugs related to this architecture that caused issues preventing its 
+// completion in the current implementation:
+// - LIDAR cannot scan down so there is a radius around the rover that is UNKNOWN
+//.  because we assume UNKNOWN cells are blocking for pathfinding, the rover gets stuck
+// - Finding the best frontier point to explore, and importantly, projecting that point
+//.  to the closest navigable point
+// - Add pausing to navigation to allow time for LIDAR scanning and frontier analysis before
+//.  moving away or finding a new frontier to explore
 static void consume_frontier_waypoints(void) {
     if (frontier_waypoints_read_fd < 0) {
         return;
@@ -117,7 +130,7 @@ static void consume_frontier_waypoints(void) {
 
         Waypoint waypoints[MAX_WAYPOINTS];
         if (waypoint_count > 0) {
-            ssize_t expected = (ssize_t)(sizeof(Waypoint) * waypoint_count);
+            int expected = (int)(sizeof(Waypoint) * waypoint_count);
             if (read(frontier_waypoints_read_fd, waypoints, expected) != expected) {
                 return;
             }
@@ -137,8 +150,8 @@ void create_workers(void){
     int updated_voxels_pipe[2];
     int frontier_waypoints_pipe[2];
     int rover_pose_pipe[2];
-    int mppi_cmd_pipe[2];
-    int mppi_result_pipe[2];
+    int rollout_cmd_pipe[2];
+    int rollout_result_pipe[2];
 
     pipe(rover_pose_pipe);
     pipe(ray_batch_results_pipe);
@@ -146,8 +159,8 @@ void create_workers(void){
     pipe(point_batch_pipe);
     pipe(updated_voxels_pipe);
     pipe(frontier_waypoints_pipe);
-    pipe(mppi_cmd_pipe);
-    pipe(mppi_result_pipe);
+    pipe(rollout_cmd_pipe);
+    pipe(rollout_result_pipe);
 
 
     scan_coord_pid = fork();
@@ -171,10 +184,10 @@ void create_workers(void){
         close(frontier_waypoints_pipe[1]);
         close(rover_pose_pipe[0]);
         close(rover_pose_pipe[1]);
-        close(mppi_cmd_pipe[0]);
-        close(mppi_cmd_pipe[1]);
-        close(mppi_result_pipe[0]);
-        close(mppi_result_pipe[1]);
+        close(rollout_cmd_pipe[0]);
+        close(rollout_cmd_pipe[1]);
+        close(rollout_result_pipe[0]);
+        close(rollout_result_pipe[1]);
 
 
 
@@ -233,10 +246,10 @@ void create_workers(void){
         close(frontier_waypoints_pipe[1]); // close write end
         close(rover_pose_pipe[0]); // close read end
         close(rover_pose_pipe[1]); // close write end
-        close(mppi_cmd_pipe[0]);
-        close(mppi_cmd_pipe[1]);
-        close(mppi_result_pipe[0]);
-        close(mppi_result_pipe[1]);
+        close(rollout_cmd_pipe[0]);
+        close(rollout_cmd_pipe[1]);
+        close(rollout_result_pipe[0]);
+        close(rollout_result_pipe[1]);
         run_occupancy_updater_loop(point_batch_pipe[0], updated_voxels_pipe[1], &occupancy_grid_3d);
         exit(0);
         // run occupancy updater loop
@@ -257,21 +270,21 @@ void create_workers(void){
         close(ray_batch_results_pipe[1]); // close write end
         close(updated_voxels_pipe[1]); // close write end
         close(rover_pose_pipe[1]); // close write end
-        close(mppi_cmd_pipe[0]);
-        close(mppi_cmd_pipe[1]);
-        close(mppi_result_pipe[0]);
-        close(mppi_result_pipe[1]);
+        close(rollout_cmd_pipe[0]);
+        close(rollout_cmd_pipe[1]);
+        close(rollout_result_pipe[0]);
+        close(rollout_result_pipe[1]);
         run_frontier_analyzer_loop(updated_voxels_pipe[0], frontier_waypoints_pipe[1], rover_pose_pipe[0], &occupancy_grid_3d, &occupancy_grid_2d);
         exit(0);
     }
 
-    mppi_coord_pid = fork();
-    if (mppi_coord_pid < 0) {
+    rollout_coord_pid = fork();
+    if (rollout_coord_pid < 0) {
         perror("fork");
         exit(1);
     }
-    else if (mppi_coord_pid == 0) {
-        signal(SIGTERM, mppi_coordinator_sigterm);
+    else if (rollout_coord_pid == 0) {
+        signal(SIGTERM, rollout_coordinator_sigterm);
 
         close(scan_cmd_pipe[0]);
         close(scan_cmd_pipe[1]);
@@ -286,42 +299,42 @@ void create_workers(void){
         close(rover_pose_pipe[0]);
         close(rover_pose_pipe[1]);
 
-        close(mppi_cmd_pipe[1]);
-        close(mppi_result_pipe[0]);
+        close(rollout_cmd_pipe[1]);
+        close(rollout_result_pipe[0]);
 
-        int mppi_task_pipes[NUM_WORKERS][2];
-        int mppi_cost_pipes[NUM_WORKERS][2];
+        int rollout_task_pipes[NUM_WORKERS][2];
+        int rollout_costs_pipes[NUM_WORKERS][2];
 
         for (int i = 0; i < NUM_WORKERS; i++) {
-            pipe(mppi_task_pipes[i]);
-            pipe(mppi_cost_pipes[i]);
+            pipe(rollout_task_pipes[i]);
+            pipe(rollout_costs_pipes[i]);
             int wpid = fork();
             if (wpid == 0) {
                 signal(SIGTERM, sigterm_handler);
 
-                close(mppi_cmd_pipe[0]);
-                close(mppi_result_pipe[1]);
+                close(rollout_cmd_pipe[0]);
+                close(rollout_result_pipe[1]);
 
                 for (int j = 0; j < NUM_WORKERS; j++) {
                     if (j != i) {
-                        close(mppi_task_pipes[j][0]);
-                        close(mppi_task_pipes[j][1]);
-                        close(mppi_cost_pipes[j][0]);
-                        close(mppi_cost_pipes[j][1]);
+                        close(rollout_task_pipes[j][0]);
+                        close(rollout_task_pipes[j][1]);
+                        close(rollout_costs_pipes[j][0]);
+                        close(rollout_costs_pipes[j][1]);
                     } else {
-                        close(mppi_task_pipes[j][1]);
-                        close(mppi_cost_pipes[j][0]);
+                        close(rollout_task_pipes[j][1]);
+                        close(rollout_costs_pipes[j][0]);
                     }
                 }
 
-                run_mppi_worker_loop(mppi_task_pipes[i][0], mppi_cost_pipes[i][1], &scene);
+                run_rollout_worker_loop(rollout_task_pipes[i][0], rollout_costs_pipes[i][1], &scene);
                 exit(0);
             } else {
-                mppi_worker_pids[i] = wpid;
+                rollout_workers_pid[i] = wpid;
             }
         }
 
-        run_mppi_coordinator_loop(mppi_cmd_pipe[0], mppi_result_pipe[1], mppi_task_pipes, mppi_cost_pipes);
+        run_rollout_coordinator_loop(rollout_cmd_pipe[0], rollout_result_pipe[1], rollout_task_pipes, rollout_costs_pipes);
         exit(0);
     }
 
@@ -334,14 +347,14 @@ void create_workers(void){
     close(updated_voxels_pipe[0]);
     close(updated_voxels_pipe[1]); 
     close(rover_pose_pipe[0]);
-    close(mppi_cmd_pipe[0]);
-    close(mppi_result_pipe[1]);
+    close(rollout_cmd_pipe[0]);
+    close(rollout_result_pipe[1]);
     // updated_voxels_pipe_rd = updated_voxels_pipe[0]; // store read end for main loop to read updated voxels from occupancy updater
 
     set_scan_pipe_fds(scan_cmd_pipe[1], ray_batch_results_pipe[0]);
     frontier_waypoints_read_fd = frontier_waypoints_pipe[0];
     set_replan_pipe_fd(rover_pose_pipe[1]);
-    set_mppi_pipe_fds(mppi_cmd_pipe[1], mppi_result_pipe[0]);
+    set_rollout_pipe_fds(rollout_cmd_pipe[1], rollout_result_pipe[0]);
     
 }
 
@@ -377,34 +390,9 @@ void display() {
     // move sensor
     if (!is_paused) {
         sensor_step(&scene, &cloud, &occupancy_grid_3d);
+        // EKF integration is temporarily disabled.
+        // update_lidar_fusion(&cloud, get_scan_theta());
     }
-
-    // // read from updated voxels pipe and update occupancy map
-    // // TODO: only reading for now to unblock
-    // if (updated_voxels_pipe_rd != -1){
-    //     fd_set updated_voxels_set;
-    //     FD_ZERO(&updated_voxels_set);
-    //     FD_SET(updated_voxels_pipe_rd, &updated_voxels_set);
-    //     struct timeval timeout = {0, 0}; // non-blocking
-    //     int ret = select(updated_voxels_pipe_rd + 1, &updated_voxels_set, NULL, NULL, &timeout);
-    //     while (ret > 0 && FD_ISSET(updated_voxels_pipe_rd, &updated_voxels_set)) {
-    //         int count = 0;
-    //         read(updated_voxels_pipe_rd, &count, sizeof(int));
-    //         VoxelUpdate updates[count];
-    //         if (read(updated_voxels_pipe_rd, &updates, sizeof(VoxelUpdate) * count) == -1) {
-    //             perror("read");
-    //             exit(1);
-    //         }
-    //         else {
-    //             // update_projected_frontiers(&occupancy_grid_3d, updates, count);
-    //         }
-
-    //         FD_ZERO(&updated_voxels_set);
-    //         FD_SET(updated_voxels_pipe_rd, &updated_voxels_set);
-    //         // keep looping until we clear out the pipe
-    //         ret = select(updated_voxels_pipe_rd + 1, &updated_voxels_set, NULL, NULL, &timeout);
-    //     }   
-    // }
 
     // point cloud render
     glDepthMask(GL_FALSE);
@@ -441,6 +429,7 @@ int main(int argc, char** argv) {
     init_sensor_state();
     init_rover_controller();
 
+    // TODO: we want to move to auto generated paths eventually
     Waypoint test_path[] = {
         {6, 0},
         {12, 0},
