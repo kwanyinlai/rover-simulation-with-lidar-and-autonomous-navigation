@@ -1,9 +1,11 @@
 #include "piping/method_dispatcher.h"
 #include "scene/frontier_projection.h"
+#include "core/io_utils.h"
 #include "lidar/sensor_control.h"
 #include "rover/rover_controller.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <sys/select.h>
 #include <unistd.h>
 
@@ -32,13 +34,22 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
         FD_SET(rover_pose_read_fd, &read_fds);
         int max_fd = voxel_update_read_fd > rover_pose_read_fd ? voxel_update_read_fd : rover_pose_read_fd;
 
-        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) <= 0) {
+        int ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (ready < 0) {
+            perror("select frontier analyzer inputs");
+            exit(1);
+        }
+        if (ready == 0) {
             continue;
         }
 
         if (FD_ISSET(rover_pose_read_fd, &read_fds)) {
-            if (read(rover_pose_read_fd, &latest_rover_state, sizeof(SensorState)) <= 0) {
+            int pose_read = read_exact(rover_pose_read_fd, &latest_rover_state, sizeof(SensorState));
+            if (pose_read == 0) {
                 break;
+            }
+            if (pose_read < 0) {
+                exit(1);
             }
             // This is an artifact of autonomous navigation which is not yet implemented yet
             (void) frontier_write_fd;
@@ -61,12 +72,20 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
         }
 
         count = 0;
-        if (read(voxel_update_read_fd, &count, sizeof(int)) <= 0) {
+        int count_read = read_exact(voxel_update_read_fd, &count, sizeof(int));
+        if (count_read == 0) {
             break;
         }
+        if (count_read < 0) {
+            exit(1);
+        }
 
-        if (read(voxel_update_read_fd, updates, sizeof(VoxelUpdate) * count) <= 0) {
+        int updates_read = read_exact(voxel_update_read_fd, updates, sizeof(VoxelUpdate) * count);
+        if (updates_read == 0) {
             break;
+        }
+        if (updates_read < 0) {
+            exit(1);
         }
 
         apply_updates_to_projected_map(column_summaries, updates, count,

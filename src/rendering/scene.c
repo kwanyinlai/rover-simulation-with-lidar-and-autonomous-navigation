@@ -1,6 +1,9 @@
 #include "rendering/scene.h"
 #include "core/vec3.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #define INIT_SIZE 32
 
 void triangle_array_init(TriangleArray *scene) {
@@ -14,7 +17,7 @@ void triangle_array_push_back(TriangleArray *scene, Triangle triangle) {
         int new_capacity = scene->capacity == 0 ? INIT_SIZE : scene->capacity * 2;
         Triangle *new_data = realloc(scene->data, new_capacity * sizeof(Triangle));
         if (new_data == NULL) {
-            fprintf(stderr, "Failed to allocate memory for TriangleArray\n");
+            perror("realloc");
             exit(1);
         }
         scene->data = new_data;

@@ -134,7 +134,13 @@ void occupancy_map_ray_cast(const OccupancyMap *occupancy_grid_3d, Vector3 origi
         CELL_STATE new_state = occupancy_map_get_cell(occupancy_grid_3d, x, y, z);
 
         if (prev_state != new_state){
-            out_data->updates[out_data->count++] = (VoxelUpdate){.idx = VOXEL_IDX(occupancy_grid_3d, x, y, z), .new_state = new_state, .prev_state = prev_state};
+            if (out_data->count < MAX_UPDATED_VOXELS) {
+                out_data->updates[out_data->count++] = (VoxelUpdate){
+                    .idx = VOXEL_IDX(occupancy_grid_3d, x, y, z),
+                    .new_state = new_state,
+                    .prev_state = prev_state
+                };
+            }
         }
 
         if (t_x < t_y && t_x < t_z) {
@@ -155,7 +161,13 @@ void occupancy_map_ray_cast(const OccupancyMap *occupancy_grid_3d, Vector3 origi
     }
     CELL_STATE new_state = occupancy_map_get_cell(occupancy_grid_3d, hit_x, hit_y, hit_z);
     if (prev_state != new_state){
-        out_data->updates[out_data->count++] = (VoxelUpdate){.idx = VOXEL_IDX(occupancy_grid_3d, hit_x, hit_y, hit_z), .new_state = new_state, .prev_state = prev_state};
+        if (out_data->count < MAX_UPDATED_VOXELS) {
+            out_data->updates[out_data->count++] = (VoxelUpdate){
+                .idx = VOXEL_IDX(occupancy_grid_3d, hit_x, hit_y, hit_z),
+                .new_state = new_state,
+                .prev_state = prev_state
+            };
+        }
     }
 }
 

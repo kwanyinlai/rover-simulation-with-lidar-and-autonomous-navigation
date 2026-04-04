@@ -1,5 +1,5 @@
 
-# ifndef METHOD_DISPATCHER_H
+#ifndef METHOD_DISPATCHER_H
 #define METHOD_DISPATCHER_H
 
 #include "rendering/scene.h"

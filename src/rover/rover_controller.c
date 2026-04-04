@@ -11,6 +11,7 @@
 #include "core/physics_constants.h"
 #include "core/noise.h"
 #include "core/math_utils.h"
+#include "core/io_utils.h"
 #include "rover/ekf_fusion.h"
 #include "rover/rover_physics.h"
 
@@ -327,13 +328,17 @@ static int evaluate_rollouts_via_pipe(void)
     memcpy(request.steer_noise, steer_noise, sizeof(steer_noise));
     memcpy(request.throttle_noise, throttle_noise, sizeof(throttle_noise));
 
-    if (write(rollout_cmd_write_fd, &request, sizeof(RolloutRequest)) != sizeof(RolloutRequest)) {
-        return 0;
+    if (write_exact(rollout_cmd_write_fd, &request, sizeof(RolloutRequest)) < 0) {
+        exit(1);
     }
 
     BatchedRolloutResult result;
-    if (read(rollout_result_read_fd, &result, sizeof(BatchedRolloutResult)) != sizeof(BatchedRolloutResult)) {
-        return 0;
+    int result_read = read_exact(rollout_result_read_fd, &result, sizeof(BatchedRolloutResult));
+    if (result_read <= 0) {
+        if (result_read == 0) {
+            fprintf(stderr, "rollout result pipe closed unexpectedly\n");
+        }
+        exit(1);
     }
 
     memcpy(trajectory_cost, result.costs, sizeof(trajectory_cost));
@@ -470,7 +475,9 @@ void update_path_follower(float dt) {
     (void) dt; // dt is currently unused but might be needed in the future
     if (active_path.current >= active_path.count) {
         if (!replan_request_sent && require_replan_write_fd >= 0) {
-            write(require_replan_write_fd, &rover_pose, sizeof(SensorState));
+            if (write_exact(require_replan_write_fd, &rover_pose, sizeof(SensorState)) < 0) {
+                exit(1);
+            }
             replan_request_sent = 1;
         }
         set_throttle(0.0f);

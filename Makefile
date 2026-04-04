@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=c99 -MMD -MP -Isrc
+CFLAGS = -Wall -Wextra -O2 -MMD -MP -Isrc
 
 BUILD_DIR = build
 SRCS_DIR = src
@@ -16,6 +16,7 @@ endif
 
 TARGET = $(BUILD_DIR)/lidar_sim
 
+# detect OS for appropriate linking
 SRCS = $(shell find $(SRCS_DIR) -name '*.c')
 
 OBJS = $(patsubst $(SRCS_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))

@@ -4,9 +4,12 @@
 #include "lidar/raycaster.h"
 #include "lidar/sensor_control.h"
 #include "core/noise.h"
+#include "core/io_utils.h"
 #include "rover/rover_controller.h"
 
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -14,7 +17,14 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
     const float noise_factor = 0.01f;
     RayResultBatch ray_result_batch;
     RayBatch ray_batch;
-    while (read(read_fd, &ray_batch, sizeof(RayBatch)) > 0) {
+    while (1) {
+        int status = read_exact(read_fd, &ray_batch, sizeof(RayBatch));
+        if (status == 0) {
+            break;
+        }
+        if (status < 0) {
+            exit(1);
+        }
         ray_result_batch.count = 0;
         ray_result_batch.origin = ray_batch.origin;
         for (int i = ray_batch.start_ray_idx; i < ray_batch.end_ray_idx; i++) {
@@ -52,14 +62,23 @@ void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
                 };
             }
         }
-        write(write_fd, &ray_result_batch, sizeof(RayResultBatch));
+        if (write_exact(write_fd, &ray_result_batch, sizeof(RayResultBatch)) < 0) {
+            exit(1);
+        }
     }
 }
 
 void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
 {
     RolloutJob job;
-    while (read(read_fd, &job, sizeof(RolloutJob)) > 0) {
+    while (1) {
+        int status = read_exact(read_fd, &job, sizeof(RolloutJob));
+        if (status == 0) {
+            break;
+        }
+        if (status < 0) {
+            exit(1);
+        }
         RolloutResult result;
         memset(&result, 0, sizeof(result));
         result.frame_id = job.frame_id;
@@ -78,6 +97,8 @@ void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
                                                         request->throttle_noise[i]);
         }
 
-        write(write_fd, &result, sizeof(RolloutResult));
+        if (write_exact(write_fd, &result, sizeof(RolloutResult)) < 0) {
+            exit(1);
+        }
     }
 }

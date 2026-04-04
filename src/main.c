@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "core/io_utils.h"
 #include "core/vec3.h"
 #include "rendering/scene.h"
 #include "scene/scene_state.h"
@@ -64,12 +65,17 @@ void handle_sigint(int sig) {
 // store worker ids to kill before terminating coordinator
 static int worker_pids[NUM_WORKERS] = {0};
 static int rollout_workers_pid[NUM_WORKERS] = {0};
+
 static void coordinator_sigterm(int sig) {
     (void)sig;
     for (int i = 0; i < NUM_WORKERS; i++) {
         if (worker_pids[i] > 0) {
-            kill(worker_pids[i], SIGTERM);
-            waitpid(worker_pids[i], NULL, 0); 
+            if (kill(worker_pids[i], SIGTERM) < 0) {
+                perror("kill ray worker");
+            }
+            if (waitpid(worker_pids[i], NULL, 0) < 0) {
+                perror("waitpid ray worker");
+            }
         }
     }
     exit(0);
@@ -79,8 +85,12 @@ static void rollout_coordinator_sigterm(int sig) {
     (void)sig;
     for (int i = 0; i < NUM_WORKERS; i++) {
         if (rollout_workers_pid[i] > 0) {
-            kill(rollout_workers_pid[i], SIGTERM);
-            waitpid(rollout_workers_pid[i], NULL, 0);
+            if (kill(rollout_workers_pid[i], SIGTERM) < 0) {
+                perror("kill rollout worker");
+            }
+            if (waitpid(rollout_workers_pid[i], NULL, 0) < 0) {
+                perror("waitpid rollout worker");
+            }
         }
     }
     exit(0);
@@ -112,12 +122,17 @@ static void consume_frontier_waypoints(void) {
         FD_SET(frontier_waypoints_read_fd, &waypoint_set);
 
         int ready = select(frontier_waypoints_read_fd + 1, &waypoint_set, NULL, NULL, &timeout);
-        if (ready <= 0 || !FD_ISSET(frontier_waypoints_read_fd, &waypoint_set)) {
+        if (ready < 0) {
+            perror("select frontier waypoints");
+            return;
+        }
+        if (ready == 0 || !FD_ISSET(frontier_waypoints_read_fd, &waypoint_set)) {
             return;
         }
 
         int waypoint_count = 0;
-        if (read(frontier_waypoints_read_fd, &waypoint_count, sizeof(int)) <= 0) {
+        int count_status = read_exact(frontier_waypoints_read_fd, &waypoint_count, sizeof(int));
+        if (count_status <= 0) {
             return;
         }
 
@@ -130,8 +145,8 @@ static void consume_frontier_waypoints(void) {
 
         Waypoint waypoints[MAX_WAYPOINTS];
         if (waypoint_count > 0) {
-            int expected = (int)(sizeof(Waypoint) * waypoint_count);
-            if (read(frontier_waypoints_read_fd, waypoints, expected) != expected) {
+            size_t expected = sizeof(Waypoint) * (size_t)waypoint_count;
+            if (read_exact(frontier_waypoints_read_fd, waypoints, expected) <= 0) {
                 return;
             }
         }
@@ -142,7 +157,7 @@ static void consume_frontier_waypoints(void) {
 
 void create_workers(void){
 
-    signal(SIGTERM, sigterm_handler); 
+    signal(SIGTERM, sigterm_handler);
 
     int scan_cmd_pipe[2];
     int point_batch_pipe[2];
@@ -153,14 +168,38 @@ void create_workers(void){
     int rollout_cmd_pipe[2];
     int rollout_result_pipe[2];
 
-    pipe(rover_pose_pipe);
-    pipe(ray_batch_results_pipe);
-    pipe(scan_cmd_pipe);
-    pipe(point_batch_pipe);
-    pipe(updated_voxels_pipe);
-    pipe(frontier_waypoints_pipe);
-    pipe(rollout_cmd_pipe);
-    pipe(rollout_result_pipe);
+    if (pipe(rover_pose_pipe) < 0) { 
+        perror("pipe rover_pose"); 
+        exit(1);
+    }
+    if (pipe(ray_batch_results_pipe) < 0) {
+        perror("pipe ray_batch_results"); 
+        exit(1);
+    }
+    if (pipe(scan_cmd_pipe) < 0) {
+        perror("pipe scan_cmd");
+        exit(1);
+    }
+    if (pipe(point_batch_pipe) < 0) { 
+        perror("pipe point_batch"); 
+        exit(1);
+    }
+    if (pipe(updated_voxels_pipe) < 0) { 
+        perror("pipe updated_voxels"); 
+        exit(1);
+    }
+    if (pipe(frontier_waypoints_pipe) < 0) { 
+        perror("pipe frontier_waypoints"); 
+        exit(1);
+    }
+    if (pipe(rollout_cmd_pipe) < 0) { 
+        perror("pipe rollout_cmd"); 
+        exit(1);
+    }
+    if (pipe(rollout_result_pipe) < 0) { 
+        perror("pipe rollout_result"); 
+        exit(1);
+    }
 
 
     scan_coord_pid = fork();
@@ -171,7 +210,7 @@ void create_workers(void){
     else if (scan_coord_pid == 0) {
         // scan coordinator
 
-        signal(SIGTERM, coordinator_sigterm); 
+        signal(SIGTERM, coordinator_sigterm);
 
         // receive scan commands from main process
         close(scan_cmd_pipe[1]); // close write end of scan cmd 
@@ -194,11 +233,27 @@ void create_workers(void){
         int ray_task_pipe[NUM_WORKERS][2];
         int ray_results_pipe[NUM_WORKERS][2];
         for (int i = 0; i < NUM_WORKERS; i++) {
-            pipe(ray_task_pipe[i]);
-            pipe(ray_results_pipe[i]);
+            if (pipe(ray_task_pipe[i]) < 0) { 
+                perror("pipe ray_task");
+                exit(1);
+            }
+            if (pipe(ray_results_pipe[i]) < 0) {
+                perror("pipe ray_results");
+                exit(1);
+            }
+        }
+        for (int i = 0; i < NUM_WORKERS; i++) {
             int wpid = fork();
+            if (wpid < 0) {
+                perror("Failed to fork ray worker");
+                for (int j = 0; j < i; j++) {
+                    kill(worker_pids[j], SIGTERM);
+                    waitpid(worker_pids[j], NULL, 0);
+                }
+                exit(1);
+            }
             if (wpid == 0) {
-                signal(SIGTERM, sigterm_handler); 
+                signal(SIGTERM, sigterm_handler);
                 // additionally close scan_cmd read
                 close(scan_cmd_pipe[0]);
                 // additionally close write end of ray batch results
@@ -234,7 +289,7 @@ void create_workers(void){
 
     int updater_pid = fork();
     if (updater_pid < 0) {
-        fprintf(stderr, "Failed to fork process\n");
+        perror("fork updater");
         exit(1);
     }
     else if (updater_pid == 0) {
@@ -257,7 +312,7 @@ void create_workers(void){
 
     int frontier_pid = fork();
     if (frontier_pid < 0) {
-        perror("fork");
+        perror("fork frontier_analyzer");
         exit(1);
     }
     else if (frontier_pid == 0) {
@@ -280,7 +335,7 @@ void create_workers(void){
 
     rollout_coord_pid = fork();
     if (rollout_coord_pid < 0) {
-        perror("fork");
+        perror("fork rollout_coordinator");
         exit(1);
     }
     else if (rollout_coord_pid == 0) {
@@ -304,12 +359,29 @@ void create_workers(void){
 
         int rollout_task_pipes[NUM_WORKERS][2];
         int rollout_costs_pipes[NUM_WORKERS][2];
-
+        // deal with pipes separately so we can exit on error cleanly
         for (int i = 0; i < NUM_WORKERS; i++) {
-            pipe(rollout_task_pipes[i]);
-            pipe(rollout_costs_pipes[i]);
+            if (pipe(rollout_task_pipes[i]) < 0) {
+                perror("pipe rollout_task");
+                exit(1);
+            }
+            if (pipe(rollout_costs_pipes[i]) < 0) {
+                perror("pipe rollout_cost");
+                exit(1);
+            }
+        }
+        for (int i = 0; i < NUM_WORKERS; i++){
             int wpid = fork();
-            if (wpid == 0) {
+            if (wpid < 0) {
+                perror("fork rollout_worker");
+                // kill any workers already spawned
+                for (int j = 0; j < i; j++) {
+                    kill(rollout_workers_pid[j], SIGTERM);
+                    waitpid(rollout_workers_pid[j], NULL, 0);
+                }
+                exit(1);;
+            }
+            else if (wpid == 0) {
                 signal(SIGTERM, sigterm_handler);
 
                 close(rollout_cmd_pipe[0]);

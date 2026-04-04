@@ -1,5 +1,6 @@
 #include "scene/frontier_projection.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 ColumnSummary *create_column_summaries(const OccupancyMap *occupancy_grid_3d,
@@ -7,6 +8,7 @@ ColumnSummary *create_column_summaries(const OccupancyMap *occupancy_grid_3d,
     int column_count = occupancy_grid_3d->width * occupancy_grid_3d->depth;
     ColumnSummary *column_summaries = malloc((int)column_count * sizeof(ColumnSummary));
     if (!column_summaries) {
+        perror("malloc");
         return NULL;
     }
 

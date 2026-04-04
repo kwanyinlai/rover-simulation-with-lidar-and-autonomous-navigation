@@ -5,6 +5,7 @@
 
 #include "core/noise.h"
 #include "core/physics_constants.h"
+#include "core/io_utils.h"
 #include "lidar/lidar_sensor.h"
 #include "lidar/raycaster.h"
 #include "lidar/sensor_control.h"
@@ -88,16 +89,32 @@ void cast_all_rays(const TriangleArray *scene,
     };
 
     get_sensor_pos(&scan_request.origin);
-    write(g_scan_cmd_fd, &scan_request, sizeof(ScanRequest));
+
+    if (write_exact(g_scan_cmd_fd, &scan_request, sizeof(ScanRequest)) <= 0) {
+        exit(1);
+    }
+
     RayResultBatch ray_result_batch;
     for (int i = 0; i < NUM_WORKERS; i++) {
-        int n = read(g_ray_batch_results_fd, &ray_result_batch, sizeof(RayResultBatch));
-        if (n == sizeof(RayResultBatch)) {
-            for (int j = 0; j < ray_result_batch.count; j++) {
-                RayResult *r = &ray_result_batch.rays[j];
-                if (r->distance > 0.0f) {
-                    point_cloud_push_back(point_cloud, r->hit, r->distance, r->intensity);
-                }
+        int n = read_exact(g_ray_batch_results_fd, &ray_result_batch, sizeof(RayResultBatch));
+        if (n <= 0) {
+            if (n == 0) {
+                fprintf(stderr, "ray batch result pipe closed unexpectedly\n");
+            } else {
+                perror("read ray result batch");
+            }
+            exit(1);
+        }
+
+        if (ray_result_batch.count < 0 || ray_result_batch.count > (NUM_RINGS / NUM_WORKERS)) {
+            fprintf(stderr, "invalid ray_result_batch.count=%d\n", ray_result_batch.count);
+            exit(1);
+        }
+
+        for (int j = 0; j < ray_result_batch.count; j++) {
+            RayResult *r = &ray_result_batch.rays[j];
+            if (r->distance > 0.0f) {
+                point_cloud_push_back(point_cloud, r->hit, r->distance, r->intensity);
             }
         }
     }
