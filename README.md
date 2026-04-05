@@ -1,6 +1,6 @@
 # Lidar Rover Simulation
 
-A real-time 2D LiDAR rover simulation written in C with OpenGL/GLUT rendering. The rover autonomously explores an environment using frontier-based exploration (CORRECTION: frontier-based exploration is not complete yet but will be implemented soon), building an occupancy map from raycasted LiDAR scans as it moves.
+A real-time 3D LiDAR rover simulation written in C with OpenGL/GLUT rendering. The rover autonomously explores an environment using frontier-based exploration (CORRECTION: frontier-based exploration is not complete yet but will be implemented soon), building an occupancy map from raycasted LiDAR scans as it moves.
 
 <img width="753" height="757" alt="Screenshot 2026-04-03 at 6 06 45 PM" src="https://github.com/user-attachments/assets/04cbdf64-4cd9-49a4-b01b-2dbf83e0e28a" />
 <img width="735" height="662" alt="Screenshot 2026-04-03 at 6 11 26 PM" src="https://github.com/user-attachments/assets/2dd5b375-8b8f-4755-92b3-4b3437a9fef2" />
