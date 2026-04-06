@@ -1,4 +1,4 @@
-# Lidar Rover Simulation
+# LiDAR Rover Simulation with Autonomous Navigation and Frontier Exploration
 
 A real-time 3D LiDAR rover simulation written in C with OpenGL/GLUT rendering. The rover autonomously explores an environment using frontier-based exploration (CORRECTION: frontier-based exploration is not complete yet but will be implemented soon), building an occupancy map from raycasted LiDAR scans as it moves.
 
