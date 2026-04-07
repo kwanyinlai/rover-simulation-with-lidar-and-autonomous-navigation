@@ -19,6 +19,7 @@
 #include "scene/occupancy_map.h"
 #include "piping/method_dispatcher.h"
 #include "rover/rover_controller.h"
+#include "rover/ekf_fusion.h"
 
 
 TriangleArray scene;
@@ -168,6 +169,8 @@ void create_workers(void){
     int rover_pose_pipe[2];
     int rollout_cmd_pipe[2];
     int rollout_result_pipe[2];
+    int scan_match_cmd_pipe[2];
+    int scan_match_result_pipe[2];
 
     if (pipe(rover_pose_pipe) < 0) { 
         perror("pipe rover_pose"); 
@@ -201,6 +204,14 @@ void create_workers(void){
         perror("pipe rollout_result"); 
         exit(1);
     }
+    if (pipe(scan_match_cmd_pipe) < 0) {
+        perror("pipe scan_match_cmd");
+        exit(1);
+    }
+    if (pipe(scan_match_result_pipe) < 0) {
+        perror("pipe scan_match_result");
+        exit(1);
+    }
 
 
     scan_coord_pid = fork();
@@ -228,8 +239,9 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
-
-
+        
+        close(scan_match_cmd_pipe[1]);
+        close(scan_match_result_pipe[0]);
 
         int ray_task_pipe[NUM_WORKERS][2];
         int ray_results_pipe[NUM_WORKERS][2];
@@ -261,6 +273,9 @@ void create_workers(void){
                 close(point_batch_pipe[1]);
                 // additionally close read end of ray batch results
                 close(ray_batch_results_pipe[0]);
+                // close scan match pipes
+                close(scan_match_cmd_pipe[0]);
+                close(scan_match_result_pipe[1]);
                 // worker process
                 for (int j = 0; j < NUM_WORKERS; j++) {
                     if (j != i) {
@@ -284,7 +299,14 @@ void create_workers(void){
             }
         }
 
-        run_coordinator_loop(scan_cmd_pipe[0], ray_batch_results_pipe[1], ray_task_pipe, ray_results_pipe, point_batch_pipe[1]);
+        run_coordinator_loop(scan_cmd_pipe[0],
+                             ray_batch_results_pipe[1], 
+                             scan_match_cmd_pipe[0], 
+                             scan_match_result_pipe[1],
+                             ray_task_pipe, 
+                             ray_results_pipe, 
+                             point_batch_pipe[1]
+        );
         exit(0);
     }
 
@@ -306,6 +328,10 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
+        close(scan_match_cmd_pipe[0]);
+        close(scan_match_cmd_pipe[1]);
+        close(scan_match_result_pipe[0]);
+        close(scan_match_result_pipe[1]);
         run_occupancy_updater_loop(point_batch_pipe[0], updated_voxels_pipe[1], &occupancy_grid_3d);
         exit(0);
         // run occupancy updater loop
@@ -330,6 +356,10 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
+        close(scan_match_cmd_pipe[0]);
+        close(scan_match_cmd_pipe[1]);
+        close(scan_match_result_pipe[0]);
+        close(scan_match_result_pipe[1]);
         run_frontier_analyzer_loop(updated_voxels_pipe[0], frontier_waypoints_pipe[1], rover_pose_pipe[0], &occupancy_grid_3d, &occupancy_grid_2d);
         exit(0);
     }
@@ -354,9 +384,12 @@ void create_workers(void){
         close(frontier_waypoints_pipe[1]);
         close(rover_pose_pipe[0]);
         close(rover_pose_pipe[1]);
-
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
+        close(scan_match_cmd_pipe[0]);
+        close(scan_match_cmd_pipe[1]);
+        close(scan_match_result_pipe[0]);
+        close(scan_match_result_pipe[1]);
 
         int rollout_task_pipes[NUM_WORKERS][2];
         int rollout_costs_pipes[NUM_WORKERS][2];
@@ -407,10 +440,14 @@ void create_workers(void){
             }
         }
 
-        run_rollout_coordinator_loop(rollout_cmd_pipe[0], rollout_result_pipe[1], rollout_task_pipes, rollout_costs_pipes);
+        run_rollout_coordinator_loop(rollout_cmd_pipe[0], 
+                                     rollout_result_pipe[1], 
+                                     rollout_task_pipes, 
+                                     rollout_costs_pipes
+        );
         exit(0);
     }
-
+   
     close(scan_cmd_pipe[0]);
     close(point_batch_pipe[0]);
     close(point_batch_pipe[1]);
@@ -422,6 +459,10 @@ void create_workers(void){
     close(rover_pose_pipe[0]);
     close(rollout_cmd_pipe[0]);
     close(rollout_result_pipe[1]);
+
+    close(scan_match_cmd_pipe[0]);
+    close(scan_match_result_pipe[1]);
+    set_scan_match_pipe_fds(scan_match_cmd_pipe[1], scan_match_result_pipe[0]);
     // updated_voxels_pipe_rd = updated_voxels_pipe[0]; // store read end for main loop to read updated voxels from occupancy updater
 
     set_scan_pipe_fds(scan_cmd_pipe[1], ray_batch_results_pipe[0]);
@@ -482,7 +523,6 @@ void display() {
 
     render_pose_error();
     render_waypoints();
-
 
     // SWAP BUFFERS
     glutSwapBuffers();
