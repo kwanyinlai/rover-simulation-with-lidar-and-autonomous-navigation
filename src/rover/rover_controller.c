@@ -5,6 +5,7 @@
 #endif
 
 #include "rover_controller.h"
+#include "lidar/lidar_sensor.h"
 #include "lidar/sensor_control.h"
 #include "scene/scene_collision.h"
 #include "scene/scene_state.h"
@@ -68,6 +69,9 @@ RoverMode rover_mode = MODE_AUTO;
 
 static int require_replan_write_fd = -1;
 static int replan_request_sent = 0;
+static int awaiting_replan_scan = 0;
+static float replan_scan_start_theta = 0.0f;
+static const float REPLAN_SCAN_TURN_RAD = 4 * M_PI;
 static int rollout_cmd_write_fd = -1;
 static int rollout_result_read_fd = -1;
 // EKF integration is temporarily disabled.
@@ -122,6 +126,25 @@ static void advance_waypoint_by_proximity(const Path *path,
             break;
         }
     }
+}
+
+static void advance_waypoint_to_farthest_reached(const Path *path,
+                                                 int *wp_idx,
+                                                 float rover_x,
+                                                 float rover_z,
+                                                 int max_idx) {
+
+    int next_target = *wp_idx;
+    for (int i = *wp_idx; i < max_idx; i++) {
+        const Waypoint *waypoint = &path->waypoints[i];
+        float dx = waypoint->x - rover_x;
+        float dz = waypoint->z - rover_z;
+        if (dx * dx + dz * dz < WAYPOINT_REACH_THRESHOLD) {
+            next_target = i + 1;
+        }
+    }
+
+    *wp_idx = next_target;
 }
 
 // fixed constants relative to MAX_WAYPOINTS, for sanity
@@ -479,6 +502,19 @@ void update_lidar_fusion(const PointCloud *cloud, float scan_theta) {
 void update_path_follower(float dt) {
     (void) dt; // dt is currently unused but might be needed in the future
     if (active_path.current >= active_path.count) {
+        // wait for one full lidar revolution before requesting a new plan.
+        if (!awaiting_replan_scan) {
+            awaiting_replan_scan = 1;
+            replan_scan_start_theta = get_scan_theta();
+        }
+
+        float scan_delta = get_scan_theta() - replan_scan_start_theta;
+        if (scan_delta < REPLAN_SCAN_TURN_RAD) {
+            set_throttle(0.0f);
+            set_steer(0.0f);
+            return;
+        }
+
         if (!replan_request_sent && require_replan_write_fd >= 0) {
             if (write_all(require_replan_write_fd, &rover_pose, sizeof(SensorState)) < 0) {
                 exit(1);
@@ -500,13 +536,13 @@ void update_path_follower(float dt) {
         active_path.current = nearest_segment;
     }
 
-    // proximity check (non-projection)
+
     int prev_waypoint_idx = active_path.current;
-    advance_waypoint_by_proximity(&active_path,
-                                  &active_path.current,
-                                  rover_pose.origin.x,
-                                  rover_pose.origin.z,
-                                  active_path.count);
+    advance_waypoint_to_farthest_reached(&active_path,
+                                         &active_path.current,
+                                         rover_pose.origin.x,
+                                         rover_pose.origin.z,
+                                         active_path.count);
     if (active_path.current > prev_waypoint_idx) {
         printf("Waypoint %d reached\n", active_path.current - 1);
     }
@@ -516,6 +552,8 @@ void update_path_follower(float dt) {
         set_steer(0.0f);
         return;
     }
+
+    awaiting_replan_scan = 0;
 
     // run MPPI optimisation to get nominal control sequence
     mppi_update();
@@ -543,10 +581,28 @@ void update_path_follower(float dt) {
 void set_waypoints(Waypoint *points, int count)
 {
     int n = count < MAX_WAYPOINTS ? count : MAX_WAYPOINTS;
-    for (int i = 0; i < n; i++) active_path.waypoints[i] = points[i];
-    active_path.count = n;
+
+    if (n > 0) {
+        int write_idx = 0;
+
+        active_path.waypoints[write_idx++] = (Waypoint){
+            .x = rover_pose.origin.x,
+            .z = rover_pose.origin.z
+        };
+
+        for (int i = 0; i < n && write_idx < MAX_WAYPOINTS; i++) {
+            active_path.waypoints[write_idx++] = points[i];
+        }
+
+        active_path.count = write_idx;
+    } 
+    else {
+        active_path.count = 0;
+    }
+
     active_path.current = 0;
     replan_request_sent = 0;
+    awaiting_replan_scan = 0;
 
     // stale controls and reseed warm start
     memset(nom_steer, 0, sizeof(nom_steer));
@@ -579,10 +635,10 @@ void render_predicted_path(void)
     for (int i = 0; i < PREDICTION_STEPS; i++) {
         if (sim_state.wp_idx >= active_path.count) break;
         advance_waypoint_by_proximity(&active_path,
-                          &sim_state.wp_idx,
-                          sim_state.x,
-                          sim_state.z,
-                          active_path.count);
+                                      &sim_state.wp_idx,
+                                      sim_state.x,
+                                      sim_state.z,
+                                      active_path.count);
 
         rollout_simulation(&sim_state, nom_throttle[i], nom_steer[i], PREDICTION_DT);
         

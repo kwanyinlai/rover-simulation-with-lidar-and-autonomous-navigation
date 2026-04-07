@@ -235,7 +235,25 @@ void update_column_summaries(ColumnSummary *column_summaries, VoxelUpdate *updat
         ColumnSummary *col = &column_summaries[x * occupancy_grid_3d->depth + z];
 
         // undo previous state
-        if (voxel->prev_state != FREE) col->is_blocking_count--;
-        if (voxel->new_state  != FREE) col->is_blocking_count++;
+        if (voxel->prev_state == OCCUPIED) {
+            col->occupied_count--;
+        }
+        else if (voxel->prev_state == UNKNOWN) {
+            col->unknown_count--;
+        }
+
+        if (voxel->new_state == OCCUPIED) {
+            col->occupied_count++;
+        }
+        else if (voxel->new_state == UNKNOWN) {
+            col->unknown_count++;
+        }
+
+        if (col->occupied_count < 0) {
+            col->occupied_count = 0;
+        }
+        if (col->unknown_count < 0) {
+            col->unknown_count = 0;
+        }
     }
 }

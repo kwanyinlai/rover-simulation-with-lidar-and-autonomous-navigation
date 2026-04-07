@@ -1,4 +1,5 @@
 #include "piping/method_dispatcher.h"
+#include "frontier_exploration/frontier_planner.h"
 #include "scene/frontier_projection.h"
 #include "core/io_utils.h"
 #include "lidar/sensor_control.h"
@@ -51,20 +52,39 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
             if (pose_read < 0) {
                 exit(1);
             }
-            // This is an artifact of autonomous navigation which is not yet implemented yet
-            (void) frontier_write_fd;
-            /*
+
+            fprintf(stderr,
+                    "[frontier_analyzer] replan trigger: pose=(%.2f, %.2f) heading=%.2f\n",
+                    latest_rover_state.origin.x,
+                    latest_rover_state.origin.z,
+                    latest_rover_state.dir_angle);
+
             Waypoint waypoints[MAX_WAYPOINTS];
             int waypoint_count = plan_frontier_path(
                 waypoints,
                 MAX_WAYPOINTS,
-                occupancy_grid_3d,
                 occupancy_grid_2d,
                 &latest_rover_state
             );
-            write(frontier_write_fd, &waypoint_count, sizeof(int));
-            write(frontier_write_fd, waypoints, sizeof(Waypoint) * waypoint_count);
-            */
+
+            if (waypoint_count < 0) {
+                waypoint_count = 0;
+            }
+            if (waypoint_count > MAX_WAYPOINTS) {
+                waypoint_count = MAX_WAYPOINTS;
+            }
+
+            if (write_all(frontier_write_fd, &waypoint_count, sizeof(int)) < 0) {
+                perror("write frontier waypoint count");
+                exit(1);
+            }
+
+            if (waypoint_count > 0) {
+                if (write_all(frontier_write_fd, waypoints, sizeof(Waypoint) * (size_t)waypoint_count) < 0) {
+                    perror("write frontier waypoints");
+                    exit(1);
+                }
+            }
         }
 
         if (!FD_ISSET(voxel_update_read_fd, &read_fds)) {

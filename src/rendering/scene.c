@@ -143,33 +143,33 @@ void build_scene(TriangleArray *scene) {
     // Floor
     build_floor(scene);
 
-    // Back wall
-    mesh_add_quad_tesselated(
-        scene,
-        (Vector3){-15.f, 0.f, -12.f},
-        (Vector3){15.f, 0.f, -12.f},
-        (Vector3){15.f, 6.f, -12.f},
-        (Vector3){-15.f, 6.f, -12.f},
-        div_walls
-    );
+    // // Back wall
+    // mesh_add_quad_tesselated(
+    //     scene,
+    //     (Vector3){-15.f, 0.f, -12.f},
+    //     (Vector3){15.f, 0.f, -12.f},
+    //     (Vector3){15.f, 6.f, -12.f},
+    //     (Vector3){-15.f, 6.f, -12.f},
+    //     div_walls
+    // );
 
-    // Left wall
-    mesh_add_quad_tesselated(scene,
-        (Vector3){-15.f, 0.f, 12.f},
-        (Vector3){-15.f, 0.f, -12.f},
-        (Vector3){-15.f, 6.f, -12.f},
-        (Vector3){-15.f, 6.f, 12.f},
-        div_walls
-    );
+    // // Left wall
+    // mesh_add_quad_tesselated(scene,
+    //     (Vector3){-15.f, 0.f, 12.f},
+    //     (Vector3){-15.f, 0.f, -12.f},
+    //     (Vector3){-15.f, 6.f, -12.f},
+    //     (Vector3){-15.f, 6.f, 12.f},
+    //     div_walls
+    // );
 
-    // Right wall
-    mesh_add_quad_tesselated(scene,
-        (Vector3){15.f, 0.f, -12.f},
-        (Vector3){15.f, 0.f, 12.f},
-        (Vector3){15.f, 6.f, 12.f},
-        (Vector3){15.f, 6.f, -12.f},
-        div_walls
-    );
+    // // Right wall
+    // mesh_add_quad_tesselated(scene,
+    //     (Vector3){15.f, 0.f, -12.f},
+    //     (Vector3){15.f, 0.f, 12.f},
+    //     (Vector3){15.f, 6.f, 12.f},
+    //     (Vector3){15.f, 6.f, -12.f},
+    //     div_walls
+    // );
 
     // Obstacles
     mesh_add_box(scene, 3.0f, 0.0f, -5.f, 1.2f, 1.0f, 1.2f);

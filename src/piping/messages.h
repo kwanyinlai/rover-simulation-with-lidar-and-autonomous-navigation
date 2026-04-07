@@ -3,7 +3,7 @@
 #define MESSAGES_H
 
 #include "core/vec3.h"
-#define MAX_WAYPOINTS 10
+#define MAX_WAYPOINTS 100
 
 
 #define MAX_UPDATED_VOXELS 4028
@@ -21,7 +21,7 @@ typedef enum {
 } CELL_STATE;
 
 typedef struct {
-    int x, z;
+    float x, z;
 } Waypoint;
 
 typedef struct {
@@ -85,7 +85,8 @@ typedef struct {
 } MapDelta;
 
 typedef struct {
-    int is_blocking_count; // OCCUPIED or UNKNOWN count in this column
+    int occupied_count;
+    int unknown_count;
 } ColumnSummary;
 
 typedef struct {
