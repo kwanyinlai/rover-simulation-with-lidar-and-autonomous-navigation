@@ -7,6 +7,7 @@
 #define EKF_STATE_DIM 3
 #define EKF_MEAS_DIM 3
 
+
 typedef struct {
     SensorState state;
     float P[EKF_STATE_DIM][EKF_STATE_DIM]; // covariance matrix of state estimate
@@ -14,6 +15,7 @@ typedef struct {
     float R[EKF_MEAS_DIM][EKF_MEAS_DIM]; // covariance matrix of measurement noise
 } KalmanFilter;
 
+void set_scan_match_pipe_fds(int cmd_fd, int res_fd);
 void ekf_fusion_init(KalmanFilter *ekf, const SensorState *initial_state);
 void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom_prediction);
 void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float scan_theta);

@@ -2,6 +2,7 @@
 
 #include "core/math_utils.h"
 #include "core/physics_constants.h"
+#include "localization/scan_matcher.h"
 
 #include <math.h>
 #include <string.h>
@@ -10,6 +11,15 @@
 #define EKF_DEFAULT_ANGULAR_NOISE (5.0f * MATH_DEG_TO_RAD)
 #define EKF_DEFAULT_LIDAR_NOISE 0.2f
 
+
+
+static int g_synthetic_scan_cmd_fd = -1;
+static int g_synthetic_scan_res_fd = -1;
+
+void set_scan_match_pipe_fds(int cmd_fd, int res_fd) {
+    g_synthetic_scan_cmd_fd = cmd_fd;
+    g_synthetic_scan_res_fd = res_fd;
+}
 
 // Sensor Fusion with Extended Kalman Filter (EKF)
 // https://docs.ufpr.br/~danielsantos/ProbabilisticRobotics.pdf
@@ -104,6 +114,16 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom
     matrix_add(FPF_t, ekf->Q, ekf->P);
 }
 
+
+
+void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
+                                       const PointCloud *live_cloud,
+                                       float scan_theta) {
+    return;
+}
+
+
+/*
 void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float scan_theta) {
     
     // TODO: this is tough. requires localization like SLAM and I don't have time to write out a 
@@ -112,6 +132,7 @@ void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float s
     (void) cloud;
     (void) scan_theta;
 }
+*/
 
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf) {
     return &ekf->state;
