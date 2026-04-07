@@ -98,19 +98,6 @@ static void rollout_coordinator_sigterm(int sig) {
     exit(0);
 }
 
-// TODO: this is redundant right now because the frontier analyzer does not assign
-// waypoints based on frontier points. This will not be complted for the project
-// but is intended to be for extensibility when frontier-based exploration is fully
-// implemented. For now, only artifacts of this infrastructure exist.
-
-// Several bugs related to this architecture that caused issues preventing its 
-// completion in the current implementation:
-// - LIDAR cannot scan down so there is a radius around the rover that is UNKNOWN
-//.  because we assume UNKNOWN cells are blocking for pathfinding, the rover gets stuck
-// - Finding the best frontier point to explore, and importantly, projecting that point
-//.  to the closest navigable point
-// - Add pausing to navigation to allow time for LIDAR scanning and frontier analysis before
-//.  moving away or finding a new frontier to explore
 static void consume_frontier_waypoints(void) {
     if (frontier_waypoints_read_fd < 0) {
         return;

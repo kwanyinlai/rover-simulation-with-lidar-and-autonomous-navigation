@@ -10,9 +10,9 @@
 
 typedef struct {
     SensorState state;
-    float P[EKF_STATE_DIM][EKF_STATE_DIM]; // covariance matrix of state estimate
-    float Q[EKF_STATE_DIM][EKF_STATE_DIM]; // covariance matrix of process noise
-    float R[EKF_MEAS_DIM][EKF_MEAS_DIM]; // covariance matrix of measurement noise
+    float Sigma[EKF_STATE_DIM][EKF_STATE_DIM]; // covariance matrix of state estimate
+    float Q_t[EKF_STATE_DIM][EKF_STATE_DIM]; // covariance matrix of measurement noise
+    float R_t[EKF_MEAS_DIM][EKF_MEAS_DIM]; // covariance matrix of process noise
 } KalmanFilter;
 
 void set_scan_match_pipe_fds(int cmd_fd, int res_fd);

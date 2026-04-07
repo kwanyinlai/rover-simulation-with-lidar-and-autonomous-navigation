@@ -3,7 +3,7 @@
 #ifndef SENSOR_CONTROL_H
 #define SENSOR_CONTROL_H
 
-
+#define SENSOR_HEIGHT 1.0f // height of sensor above ground plane, for synthetic scan generation
 
 #include "core/vec3.h"
 #include "piping/messages.h"

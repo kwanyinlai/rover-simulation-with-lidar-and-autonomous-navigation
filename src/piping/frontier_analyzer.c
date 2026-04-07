@@ -54,7 +54,7 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
             }
 
             fprintf(stderr,
-                    "[frontier_analyzer] replan trigger: pose=(%.2f, %.2f) heading=%.2f\n",
+                    "replan trigger: pose=(%.2f, %.2f) heading=%.2f\n",
                     latest_rover_state.origin.x,
                     latest_rover_state.origin.z,
                     latest_rover_state.dir_angle);

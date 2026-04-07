@@ -14,8 +14,7 @@ static float steer;
 
 void init_sensor_state(void){
    
-    ss.origin = (Vector3){0.0f, 1.0f, 0.0f};
-
+    ss.origin = (Vector3){0.0f, SENSOR_HEIGHT, 0.0f};
     ss.speed = 0.0f;
     ss.angular_speed = 0.0f;
     ss.dir_angle = 0.0f;
