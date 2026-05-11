@@ -23,6 +23,7 @@
 #include "localization/scan_matcher.h"
 
 #define ICP_MAX_ITERATIONS 20
+#define ICP_REVOLUTIONS_PER_UPDATE 2
 
 
 TriangleArray scene;
@@ -507,8 +508,12 @@ void display() {
     // CHECK AVAILABLE SCAN AND CORRECT
     const PointCloud *latest_scan;
     const PointCloud *previous_scan;
+    static int scan_pair_counter = 0;
     if (poll_scan_pair(&scan_state, &latest_scan, &previous_scan)) {
-        update_lidar_fusion(latest_scan, previous_scan);
+        scan_pair_counter++;
+        if (scan_pair_counter % ICP_REVOLUTIONS_PER_UPDATE == 0) {
+            update_lidar_fusion(latest_scan, previous_scan);
+        }
     }
 
     // RENDER VISUAL ELEMENTS

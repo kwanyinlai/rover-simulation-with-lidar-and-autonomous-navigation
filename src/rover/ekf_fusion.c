@@ -13,6 +13,7 @@
 #define EKF_DEFAULT_ANGULAR_NOISE (5.0f * MATH_DEG_TO_RAD)
 #define EKF_DEFAULT_LIDAR_NOISE 0.2f
 #define EKF_DEFAULT_ANGLE_NOISE (10.0f * MATH_DEG_TO_RAD)
+#define ICP_CORRECTION_MAX_ITERS 10
 
 /*
 static int g_synthetic_scan_cmd_fd = -1;
@@ -190,6 +191,12 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom
 void ekf_fusion_correct_step(KalmanFilter *ekf,
                              const PointCloud *current_scan,
                              const PointCloud *reference_scan) {
+    if (!ekf || !current_scan || !reference_scan) {
+        return;
+    }
+    if (current_scan->size <= 0 || reference_scan->size <= 0) {
+        return;
+    }
                                        
     // µ_t = rover's guess of its own position
     // g(u_t, µ_t−1): state transition function, applies odometry control input to previous state estimate to get predicted new state
@@ -215,7 +222,7 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
     
 
     // line 5a: z_t = measurement from scan matching
-    ICPResult icp = run_icp(current_scan, reference_scan, 20);
+    ICPResult icp = run_icp(current_scan, reference_scan, ICP_CORRECTION_MAX_ITERS);
     if (!icp.converged || icp.error > 0.5f) {
         return;
     }

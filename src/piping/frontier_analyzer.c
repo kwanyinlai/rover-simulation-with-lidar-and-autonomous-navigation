@@ -92,7 +92,7 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
     ExplorationStats exploration_stats = init_exploration_stats(occupancy_grid_3d);
     int updates_since_log = 0;
 
-    log_exploration_stats(&exploration_stats);
+    // log_exploration_stats(&exploration_stats);
 
     while (1) {
         fd_set read_fds;
@@ -119,12 +119,6 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
                 exit(1);
             }
 
-            fprintf(stderr,
-                    "replan trigger: pose=(%.2f, %.2f) heading=%.2f\n",
-                    latest_rover_state.origin.x,
-                    latest_rover_state.origin.z,
-                    latest_rover_state.dir_angle);
-
             Waypoint waypoints[MAX_WAYPOINTS];
             int waypoint_count = plan_frontier_path(
                 waypoints,
@@ -139,6 +133,7 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
             if (waypoint_count > MAX_WAYPOINTS) {
                 waypoint_count = MAX_WAYPOINTS;
             }
+
 
             if (write_all(frontier_write_fd, &waypoint_count, sizeof(int)) < 0) {
                 perror("write frontier waypoint count");
@@ -178,7 +173,7 @@ void run_frontier_analyzer_loop(int voxel_update_read_fd,
         updates_since_log += count;
 
         if (updates_since_log >= EXPLORATION_LOG_INTERVAL_UPDATES) {
-            log_exploration_stats(&exploration_stats);
+            // log_exploration_stats(&exploration_stats);
             updates_since_log = 0;
         }
 
