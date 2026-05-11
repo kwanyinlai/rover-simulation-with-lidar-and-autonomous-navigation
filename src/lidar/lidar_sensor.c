@@ -15,6 +15,7 @@
  
 
 #define STEP 0.02f
+#define SWEEP_SLICES_PER_FRAME 8
 
 float elevations[NUM_RINGS];
 
@@ -31,6 +32,28 @@ static int g_ray_batch_results_fd = -1;
 void set_scan_pipe_fds(int scan_cmd_fd, int ray_batch_results_fd) {
     g_scan_cmd_fd = scan_cmd_fd;
     g_ray_batch_results_fd = ray_batch_results_fd;
+}
+
+void init_scan_state(ScanState *scan_state) {
+
+    init_point_cloud(&scan_state->current);
+    init_point_cloud(&scan_state->latest);
+    init_point_cloud(&scan_state->previous);
+    scan_state->has_previous = 0;
+    scan_state->sweep_ready = 0;
+}
+
+int poll_scan_pair(ScanState *scan_state,
+                   const PointCloud **latest,
+                   const PointCloud **previous) {
+    if (!scan_state->sweep_ready || !scan_state->has_previous){
+        return 0;
+    }
+    *latest = &scan_state->latest;
+    *previous = &scan_state->previous;
+    scan_state->sweep_ready = 0;
+    // updated sweep pair has been consumed now so mark as not ready
+    return 1;
 }
 
 /* LEGACY CAST RAYS
@@ -75,7 +98,8 @@ void cast_all_rays(const TriangleArray *scene, PointCloud *point_cloud, Occupanc
 
 void cast_all_rays(const TriangleArray *scene, 
                    PointCloud *point_cloud,
-                   OccupancyMap *occupancy_grid_3d) {
+                   OccupancyMap *occupancy_grid_3d,
+                   ScanState *scan_state) {
     
     (void) scene; 
     (void) occupancy_grid_3d;
@@ -111,6 +135,9 @@ void cast_all_rays(const TriangleArray *scene,
             RayResult *r = &ray_result_batch.rays[j];
             if (r->distance > 0.0f) {
                 point_cloud_push_back(point_cloud, r->hit, r->distance, r->intensity);
+                if (scan_state) {
+                    point_cloud_push_back(&scan_state->current, r->hit, r->distance, r->intensity);
+                }
             }
         }
     }
@@ -118,10 +145,33 @@ void cast_all_rays(const TriangleArray *scene,
 
 void sensor_step(const TriangleArray *scene,
                  PointCloud *point_cloud, 
-                 OccupancyMap *occupancy_grid_3d) {
+                 OccupancyMap *occupancy_grid_3d,
+                 ScanState *scan_state) {
+    for (int i = 0; i < SWEEP_SLICES_PER_FRAME; i++) {
+        float prev_theta = theta;
+        theta += STEP;
+        if (theta >= (2.0f * M_PI)) {
+            theta = fmodf(theta, 2.0f * M_PI);
+        }
+        cast_all_rays(scene, point_cloud, occupancy_grid_3d, scan_state);
 
-    theta += STEP;
-    cast_all_rays(scene, point_cloud, occupancy_grid_3d);
+        if (theta < prev_theta && scan_state) {
+            if (scan_state->has_previous) {
+                PointCloud tmp = scan_state->previous;
+                scan_state->previous = scan_state->latest;
+                scan_state->latest = tmp;
+            } 
+            else {
+                scan_state->previous = scan_state->latest;
+                scan_state->has_previous = 1;
+            }
+            PointCloud tmp = scan_state->latest;
+            scan_state->latest = scan_state->current;
+            scan_state->current = tmp;
+            scan_state->sweep_ready = 1;
+            point_cloud_clear(&scan_state->current);
+        }
+    }
 }
 
 float get_scan_theta(void) {
