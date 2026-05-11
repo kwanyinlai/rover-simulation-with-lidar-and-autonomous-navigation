@@ -4,7 +4,6 @@
 #include "core/physics_constants.h"
 #include "localization/scan_matcher.h"
 #include "lidar/sensor_control.h"
-#include "core/io_utils.h"
 #include "localization/scan_matcher.h"
 
 #include <math.h>
@@ -15,6 +14,7 @@
 #define EKF_DEFAULT_LIDAR_NOISE 0.2f
 #define EKF_DEFAULT_ANGLE_NOISE (10.0f * MATH_DEG_TO_RAD)
 
+/*
 static int g_synthetic_scan_cmd_fd = -1;
 static int g_synthetic_scan_res_fd = -1;
 
@@ -22,6 +22,7 @@ void set_scan_match_pipe_fds(int cmd_fd, int res_fd) {
     g_synthetic_scan_cmd_fd = cmd_fd;
     g_synthetic_scan_res_fd = res_fd;
 }
+*/
 
 // Sensor Fusion with Extended Kalman Filter (EKF)
 // https://docs.ufpr.br/~danielsantos/ProbabilisticRobotics.pdf
@@ -106,6 +107,7 @@ void ekf_fusion_init(KalmanFilter *ekf, const SensorState *initial_state) {
 
 // Generates a synthetic LiDAR scan from the EKF's estimated pose
 // mimicing logic in lidar_sensor.c
+/*
 static void generate_synthetic_scan(KalmanFilter *ekf, float scan_theta, PointCloud *out) {
     if (!ekf || !out) return;
     if (g_synthetic_scan_cmd_fd < 0 || g_synthetic_scan_res_fd < 0) return;
@@ -143,6 +145,7 @@ static void generate_synthetic_scan(KalmanFilter *ekf, float scan_theta, PointCl
         }
     }
 }
+*/
 
 // lines 2-3 of Table 3.3 in Probabilistic Robotics (Thrun et al.) EKF algorithm
 // µ¯_t = g(u_t, µ_t−1)
@@ -183,6 +186,7 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom
 }
 
 
+/* 
 // Table 3.3 (Thrun et al.), lines 4-6
 void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
                                        const PointCloud *live_cloud,
@@ -226,7 +230,7 @@ void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
     float z_t[EKF_STATE_DIM] = {
         ekf->state.origin.x + icp.dx,
         ekf->state.origin.z + icp.dz,
-        wrap_angle(ekf->state.dir_angle + icp.dtheta)
+        wrap_angle(ekf->state.dir_angle + icp.delta_theta)
     };
 
     // line 5: µt = µ¯t + Kt(zt − h(µ¯t))
@@ -250,12 +254,14 @@ void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
     for (int r = 0; r < EKF_STATE_DIM; r++) {
         for (int c = 0; c < EKF_STATE_DIM; c++) {
             I_minus_K_t[r][c] = (r == c ? 1.0f : 0.0f) - K_t[r][c];
+            // r == c means diagonals
         }
     }
     float Sigma_t[EKF_STATE_DIM][EKF_STATE_DIM];
     matrix_mult(I_minus_K_t, ekf->Sigma, Sigma_t);
     memcpy(ekf->Sigma, Sigma_t, sizeof(ekf->Sigma));
 }
+*/
 
 
 /*

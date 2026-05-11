@@ -15,7 +15,9 @@ typedef struct {
     float R_t[EKF_MEAS_DIM][EKF_MEAS_DIM]; // covariance matrix of process noise
 } KalmanFilter;
 
+/* 
 void set_scan_match_pipe_fds(int cmd_fd, int res_fd);
+*/
 void ekf_fusion_init(KalmanFilter *ekf, const SensorState *initial_state);
 void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom_prediction);
 void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float scan_theta);

@@ -56,6 +56,11 @@ void point_cloud_free(PointCloud *cloud);
 void init_point_cloud(PointCloud *cloud);
 
 /**
+ * @brief Clear point data without freeing storage.
+ */
+void point_cloud_clear(PointCloud *cloud);
+
+/**
  * @brief Age all points in the cloud and remove old points.
  * @param cloud The point cloud to update.
  * @param delta_time Time increment to add to each point's age.

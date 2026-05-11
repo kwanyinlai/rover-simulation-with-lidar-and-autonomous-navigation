@@ -9,41 +9,30 @@
 #include <sys/select.h>
 
 void run_coordinator_loop(int scan_cmd_read_fd, int ray_batch_writes_fd,
-                          int scan_match_cmd_read_fd, int scan_match_result_write_fd,
+                          /*int scan_match_cmd_read_fd, int scan_match_result_write_fd,*/
                           int ray_task_pipes[NUM_WORKERS][2], 
                           int ray_results_pipes[NUM_WORKERS][2],
                           int point_batch_write_fd) {
 
     ScanRequest scan_request;
     int rings_per_worker = NUM_RINGS / NUM_WORKERS;
-    int max_cmd_fd = (scan_match_cmd_read_fd > scan_cmd_read_fd ? scan_match_cmd_read_fd : scan_cmd_read_fd) + 1;
+    int max_cmd_fd = scan_cmd_read_fd + 1;
     fd_set read_fds;
 
     while (1) {
         FD_ZERO(&read_fds);
         FD_SET(scan_cmd_read_fd, &read_fds);
-        FD_SET(scan_match_cmd_read_fd, &read_fds);
 
         if (select(max_cmd_fd, &read_fds, NULL, NULL, NULL) < 0) {
             perror("select coordinator command pipes");
             break;
         }
 
-        // Determine which pipe is ready and set output FDs
-        int cmd_fd = -1, result_fd = -1;
-        int is_live = 0, is_synthetic = 0;
-        
-        if (FD_ISSET(scan_cmd_read_fd, &read_fds)) {
-            cmd_fd = scan_cmd_read_fd;
-            result_fd = ray_batch_writes_fd;
-            is_live = 1;
-        } 
-        else if (FD_ISSET(scan_match_cmd_read_fd, &read_fds)) {
-            cmd_fd = scan_match_cmd_read_fd;
-            result_fd = scan_match_result_write_fd;
-            is_synthetic = 1;
+        int cmd_fd = scan_cmd_read_fd;
+        int result_fd = ray_batch_writes_fd;
+        if (!FD_ISSET(scan_cmd_read_fd, &read_fds)) {
+            continue;
         }
-        if (cmd_fd < 0) continue;
 
         if (read_exact(cmd_fd, &scan_request, sizeof(ScanRequest)) <= 0) {
             break;
@@ -83,8 +72,7 @@ void run_coordinator_loop(int scan_cmd_read_fd, int ray_batch_writes_fd,
                     
                     if (write_all(result_fd, &batch, sizeof(RayResultBatch)) < 0) exit(1);
                     
-                    // only write live data to point batch pipe for rendering, synthetic scan matches are only used for EKF correction and not rendered
-                    if (is_live && write_all(point_batch_write_fd, &batch, sizeof(RayResultBatch)) < 0) exit(1);
+                    if (write_all(point_batch_write_fd, &batch, sizeof(RayResultBatch)) < 0) exit(1);
                     
                     done[i] = 1;
                     workers_done++;

@@ -26,6 +26,7 @@ TriangleArray scene;
 PointCloud cloud;
 OccupancyMap occupancy_grid_3d;
 OccupancyMap occupancy_grid_2d;
+ScanState scan_state;
 
 static float last_time = 0.0f;
 extern int is_render_scene;
@@ -156,8 +157,11 @@ void create_workers(void){
     int rover_pose_pipe[2];
     int rollout_cmd_pipe[2];
     int rollout_result_pipe[2];
+    /*
     int scan_match_cmd_pipe[2];
     int scan_match_result_pipe[2];
+    */
+    
 
     if (pipe(rover_pose_pipe) < 0) { 
         perror("pipe rover_pose"); 
@@ -191,6 +195,7 @@ void create_workers(void){
         perror("pipe rollout_result"); 
         exit(1);
     }
+    /*
     if (pipe(scan_match_cmd_pipe) < 0) {
         perror("pipe scan_match_cmd");
         exit(1);
@@ -199,6 +204,7 @@ void create_workers(void){
         perror("pipe scan_match_result");
         exit(1);
     }
+    */
 
 
     scan_coord_pid = fork();
@@ -227,8 +233,10 @@ void create_workers(void){
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
         
+        /*
         close(scan_match_cmd_pipe[1]);
         close(scan_match_result_pipe[0]);
+        */
 
         int ray_task_pipe[NUM_WORKERS][2];
         int ray_results_pipe[NUM_WORKERS][2];
@@ -261,8 +269,10 @@ void create_workers(void){
                 // additionally close read end of ray batch results
                 close(ray_batch_results_pipe[0]);
                 // close scan match pipes
+                /*
                 close(scan_match_cmd_pipe[0]);
                 close(scan_match_result_pipe[1]);
+                */
                 // worker process
                 for (int j = 0; j < NUM_WORKERS; j++) {
                     if (j != i) {
@@ -288,8 +298,10 @@ void create_workers(void){
 
         run_coordinator_loop(scan_cmd_pipe[0],
                              ray_batch_results_pipe[1], 
+                             /*
                              scan_match_cmd_pipe[0], 
                              scan_match_result_pipe[1],
+                             */
                              ray_task_pipe, 
                              ray_results_pipe, 
                              point_batch_pipe[1]
@@ -315,10 +327,12 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
+        /*
         close(scan_match_cmd_pipe[0]);
         close(scan_match_cmd_pipe[1]);
         close(scan_match_result_pipe[0]);
         close(scan_match_result_pipe[1]);
+        */
         run_occupancy_updater_loop(point_batch_pipe[0], updated_voxels_pipe[1], &occupancy_grid_3d);
         exit(0);
         // run occupancy updater loop
@@ -343,10 +357,12 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
+        /*
         close(scan_match_cmd_pipe[0]);
         close(scan_match_cmd_pipe[1]);
         close(scan_match_result_pipe[0]);
         close(scan_match_result_pipe[1]);
+        */
         run_frontier_analyzer_loop(updated_voxels_pipe[0], frontier_waypoints_pipe[1], rover_pose_pipe[0], &occupancy_grid_3d, &occupancy_grid_2d);
         exit(0);
     }
@@ -373,10 +389,12 @@ void create_workers(void){
         close(rover_pose_pipe[1]);
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
+        /*
         close(scan_match_cmd_pipe[0]);
         close(scan_match_cmd_pipe[1]);
         close(scan_match_result_pipe[0]);
         close(scan_match_result_pipe[1]);
+        */
 
         int rollout_task_pipes[NUM_WORKERS][2];
         int rollout_costs_pipes[NUM_WORKERS][2];
@@ -447,9 +465,11 @@ void create_workers(void){
     close(rollout_cmd_pipe[0]);
     close(rollout_result_pipe[1]);
 
+    /*
     close(scan_match_cmd_pipe[0]);
     close(scan_match_result_pipe[1]);
     set_scan_match_pipe_fds(scan_match_cmd_pipe[1], scan_match_result_pipe[0]);
+    */
     // updated_voxels_pipe_rd = updated_voxels_pipe[0]; // store read end for main loop to read updated voxels from occupancy updater
 
     set_scan_pipe_fds(scan_cmd_pipe[1], ray_batch_results_pipe[0]);
@@ -480,7 +500,13 @@ void display() {
         rover_control(delta_time);
         consume_frontier_waypoints();
     }
-    
+
+    // CHECK AVAILABLE SCAN AND CORRECT
+    const PointCloud *latest_scan;
+    const PointCloud *previous_scan;
+    if (poll_scan_pair(&scan_state, &latest_scan, &previous_scan)) {
+        // Process the available scan pair
+    }
 
     // RENDER VISUAL ELEMENTS
     if (is_render_scene) render_wire();
@@ -490,7 +516,7 @@ void display() {
 
     // move sensor
     if (!is_paused) {
-        sensor_step(&scene, &cloud, &occupancy_grid_3d);
+        sensor_step(&scene, &cloud, &occupancy_grid_3d, &scan_state);
         // EKF integration is temporarily disabled.
         // update_lidar_fusion(&cloud, get_scan_theta());
     }
@@ -529,18 +555,9 @@ int main(int argc, char** argv) {
     signal(SIGTERM, handle_sigint);
 
     init_sensor_state();
+    init_scan_state(&scan_state);
     init_rover_controller();
 
-    // TODO: we want to move to auto generated paths eventually, not for the course project though
-    Waypoint test_path[] = {
-        {6, 0},
-        {12, 0},
-        {12, 6},
-        {6, 6},
-        {6, 10},
-        {-2, 10},
-    };
-    // set_waypoints(test_path, 6);
 
     init_point_cloud(&cloud);
     triangle_array_init(&scene);

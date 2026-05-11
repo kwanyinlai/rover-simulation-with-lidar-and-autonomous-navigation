@@ -14,7 +14,7 @@ void run_occupancy_updater_loop(int, int, OccupancyMap* occupancy_grid_3d);
  * @brief Run lidar coordinator loop that dispatches ray work and gathers results.
  */
 void run_coordinator_loop(int scan_cmd_fd, int ray_batch_results_fd, 
-                          int scan_match_cmd_read_fd, int scan_match_result_write_fd,
+                          /*int scan_match_cmd_read_fd, int scan_match_result_write_fd,*/
                           int ray_task_pipes[NUM_WORKERS][2], int ray_results_pipes[NUM_WORKERS][2], 
                           int point_batch_fd);
 

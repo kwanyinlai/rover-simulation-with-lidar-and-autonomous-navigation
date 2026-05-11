@@ -8,6 +8,10 @@ void init_point_cloud(PointCloud *pc) {
     pc->capacity = 0;
 }
 
+void point_cloud_clear(PointCloud *pc) {
+    pc->size = 0;
+}
+
 void point_cloud_push_back(PointCloud *pc, Vector3 pos, float dist, float intensity) {
     if (pc->size >= pc->capacity) {
         int new_capacity = pc->capacity == 0 ? INIT_SIZE : pc->capacity * 2;
