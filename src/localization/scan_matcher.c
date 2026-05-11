@@ -48,9 +48,9 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
 
     // T_total = (R, t), composes incremental transformations in form rotation R and then translation vector t
     float T_total[3] = {0.0f, 0.0f, 0.0f}; // d_theta, dx, dz
-    float T_total[0] = 0.0f;
-    float T_total[1] = 0.0f;
-    float T_total[2] = 0.0f;
+    T_total[0] = 0.0f;
+    T_total[1] = 0.0f;
+    T_total[2] = 0.0f;
 
     float prev_error = FLT_MAX;
     
