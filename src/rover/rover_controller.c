@@ -75,7 +75,7 @@ static const float REPLAN_SCAN_TURN_RAD = 4 * M_PI;
 static int rollout_cmd_write_fd = -1;
 static int rollout_result_read_fd = -1;
 // EKF integration is temporarily disabled.
-// static KalmanFilter g_pose_ekf;
+static KalmanFilter g_pose_ekf;
 
 // nominal steer and throttle, warm started with previous frame'sim_state optimal
 static float nom_steer[MPPI_HORIZON];
@@ -450,7 +450,7 @@ void init_rover_controller(void) {
         nom_throttle[i] = 0.35f;
     }
 
-    // ekf_fusion_init(&g_pose_ekf, &rover_pose);
+    ekf_fusion_init(&g_pose_ekf, &rover_pose);
 }
 
 void update_odometry(float dt) {
@@ -479,24 +479,22 @@ void update_odometry(float dt) {
                        &scene,
                        ROVER_COLLISION_RADIUS);
 
-    // ekf_fusion_predict_from_odometry(&g_pose_ekf, &odom_prediction);
-    // const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
-    // if (fused_state) {
-    //     rover_pose = *fused_state;
-    // } else {
-    //     rover_pose = odom_prediction;
-    // }
-    rover_pose = odom_prediction;
+    ekf_fusion_predict_from_odometry(&g_pose_ekf, &odom_prediction);
+    const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
+    if (fused_state) {
+        rover_pose = *fused_state;
+    } else {
+        rover_pose = odom_prediction;
+    }
 }
 
-void update_lidar_fusion(const PointCloud *cloud, float scan_theta) {
-    // ekf_fusion_update_from_lidar(&g_pose_ekf, cloud, scan_theta);
-    // const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
-    // if (fused_state) {
-    //     rover_pose = *fused_state;
-    // }
-    (void)cloud;
-    (void)scan_theta;
+void update_lidar_fusion(const PointCloud *current_scan,
+                         const PointCloud *reference_scan) {
+    ekf_fusion_update_from_lidar(&g_pose_ekf, cloud, scan_theta);
+    const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
+    if (fused_state) {
+        rover_pose = *fused_state;
+    }
 }
 
 void update_path_follower(float dt) {

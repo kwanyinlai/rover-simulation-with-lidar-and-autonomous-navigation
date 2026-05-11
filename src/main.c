@@ -20,6 +20,9 @@
 #include "piping/method_dispatcher.h"
 #include "rover/rover_controller.h"
 #include "rover/ekf_fusion.h"
+#include "localization/scan_matcher.h"
+
+#define ICP_MAX_ITERATIONS 20
 
 
 TriangleArray scene;
@@ -505,7 +508,7 @@ void display() {
     const PointCloud *latest_scan;
     const PointCloud *previous_scan;
     if (poll_scan_pair(&scan_state, &latest_scan, &previous_scan)) {
-        // Process the available scan pair
+        update_lidar_fusion(latest_scan, previous_scan);
     }
 
     // RENDER VISUAL ELEMENTS
@@ -517,8 +520,6 @@ void display() {
     // move sensor
     if (!is_paused) {
         sensor_step(&scene, &cloud, &occupancy_grid_3d, &scan_state);
-        // EKF integration is temporarily disabled.
-        // update_lidar_fusion(&cloud, get_scan_theta());
     }
 
     // point cloud render

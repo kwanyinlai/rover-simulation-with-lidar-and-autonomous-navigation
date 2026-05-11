@@ -67,7 +67,8 @@ void update_odometry(float dt);
  * @param cloud Current point cloud buffer.
  * @param scan_theta Current horizontal scan angle in radians.
  */
-void update_lidar_fusion(const PointCloud *cloud, float scan_theta);
+void update_lidar_fusion(const PointCloud *current_scan,
+                         const PointCloud *reference_scan);
 
 /**
  * @brief Run path-following control update and emit throttle/steer commands.

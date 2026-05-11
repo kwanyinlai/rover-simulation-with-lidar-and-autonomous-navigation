@@ -186,11 +186,11 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom
 }
 
 
-/* 
 // Table 3.3 (Thrun et al.), lines 4-6
-void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
-                                       const PointCloud *live_cloud,
-                                       float scan_theta) {
+void ekf_fusion_correct_step(KalmanFilter *ekf,
+                             const PointCloud *current_scan,
+                             const PointCloud *reference_scan) {
+                                       
     // µ_t = rover's guess of its own position
     // g(u_t, µ_t−1): state transition function, applies odometry control input to previous state estimate to get predicted new state
     // Sigma = rover's uncertainty about its own position
@@ -215,14 +215,7 @@ void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
     
 
     // line 5a: z_t = measurement from scan matching
-    PointCloud synthetic = {0};
-    generate_synthetic_scan(ekf, scan_theta, &synthetic);
-    if (synthetic.size == 0) {
-        point_cloud_free(&synthetic);
-        return;
-    }
-    ICPResult icp = run_icp(&synthetic, live_cloud, 20);
-    point_cloud_free(&synthetic);
+    ICPResult icp = run_icp(current_scan, reference_scan, 20);
     if (!icp.converged || icp.error > 0.5f) {
         return;
     }
@@ -242,9 +235,9 @@ void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
         z_t[1] - ekf->state.origin.z,
         wrap_angle(z_t[2] - ekf->state.dir_angle)
     };
-    ekf->state.origin.x  += K_t[0][0]*z_minus_h_mu_bar[0] + K_t[0][1]*z_minus_h_mu_bar[1] + K_t[0][2]*z_minus_h_mu_bar[2];
-    ekf->state.origin.z  += K_t[1][0]*z_minus_h_mu_bar[0] + K_t[1][1]*z_minus_h_mu_bar[1] + K_t[1][2]*z_minus_h_mu_bar[2];
-    ekf->state.dir_angle  = wrap_angle(
+    ekf->state.origin.x += K_t[0][0]*z_minus_h_mu_bar[0] + K_t[0][1]*z_minus_h_mu_bar[1] + K_t[0][2]*z_minus_h_mu_bar[2];
+    ekf->state.origin.z += K_t[1][0]*z_minus_h_mu_bar[0] + K_t[1][1]*z_minus_h_mu_bar[1] + K_t[1][2]*z_minus_h_mu_bar[2];
+    ekf->state.dir_angle = wrap_angle(
         ekf->state.dir_angle + K_t[2][0]*z_minus_h_mu_bar[0] + K_t[2][1]*z_minus_h_mu_bar[1] + K_t[2][2]*z_minus_h_mu_bar[2]
     );
 
@@ -261,7 +254,7 @@ void ekf_fusion_correct_step_synthetic(KalmanFilter *ekf,
     matrix_mult(I_minus_K_t, ekf->Sigma, Sigma_t);
     memcpy(ekf->Sigma, Sigma_t, sizeof(ekf->Sigma));
 }
-*/
+
 
 
 /*

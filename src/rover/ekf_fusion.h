@@ -20,7 +20,9 @@ void set_scan_match_pipe_fds(int cmd_fd, int res_fd);
 */
 void ekf_fusion_init(KalmanFilter *ekf, const SensorState *initial_state);
 void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom_prediction);
-void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float scan_theta);
+void ekf_fusion_correct_step(KalmanFilter *ekf,
+                             const PointCloud *current_scan,
+                             const PointCloud *reference_scan);
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf);
 
 #endif // EKF_FUSION_H
