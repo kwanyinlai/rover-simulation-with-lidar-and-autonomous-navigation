@@ -6,13 +6,13 @@
 typedef struct {
     float dx;
     float dz;
-    float dtheta;
-    float error;     // mean closest-point distance, useful for rejecting bad matches
-    int converged;
+    float delta_theta;
+    float error; // mean closest-point distance
+    int converged; // did we converge within max iterations
 } ICPResult;
 
-ICPResult run_icp(const PointCloud *source,
-                  const PointCloud *target,
+ICPResult run_icp(const PointCloud *current_scan,
+                  const PointCloud *reference_scan,
                   int max_iterations);
 
 #endif // SCAN_MATCHER_H
