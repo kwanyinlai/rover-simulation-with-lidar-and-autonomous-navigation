@@ -168,13 +168,7 @@ In the current implementation, ray casting is distributed across worker processe
 ## EKF Sensor Fusion (In Progress)
  
 `rover/ekf_fusion` implements an Extended Kalman Filter over the state `[x, z, θ]`.
-The logic for the EKF correction step is complete but depends on an incomplete `localization/scan_matching` module, which will use Iterative Closest Point (ICP) to generate pose predictions. Additionally, this currently depends on the generation of simulated, synthetic data which is unattainable under real physical conditions; this will eventually be replaced by a more realistic and robust system, which is currently being planned. Coming soon.
- 
-```c
-// EKF integration is temporarily disabled.
-// ekf_fusion_predict_from_odometry(&g_pose_ekf, &odom_prediction);
-// const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
-```
+The logic for the EKF correction step is complete but depends on an incomplete `localization/scan_matching` module, which uses Iterative Closest Point (ICP) to generate pose predictions. All logic has been implemented but is currently still bugged pending full integration with odometry sensors, and tuning of weights.
  
 The red line rendered between the true sensor position (green) and the odometry estimate (blue) visualises the growing pose error that EKF correction would reduce.
  
