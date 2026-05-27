@@ -2,6 +2,7 @@
 #define EKF_FUSION_H
 
 #include "lidar/sensor_control.h"
+#include "localization/scan_matcher.h"
 #include "scene/point_cloud.h"
 
 #define EKF_STATE_DIM 3
@@ -23,6 +24,7 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom
 void ekf_fusion_correct_step(KalmanFilter *ekf,
                              const PointCloud *current_scan,
                              const PointCloud *reference_scan);
+void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp);
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf);
 
 #endif // EKF_FUSION_H

@@ -12,7 +12,7 @@
 
 // MPPI hyperparameters
 #define MPPI_SAMPLES 32
-#define MPPI_HORIZON 24
+#define MPPI_HORIZON 64
 
 typedef enum {
     UNKNOWN = 0,

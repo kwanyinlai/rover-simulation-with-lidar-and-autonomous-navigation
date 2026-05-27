@@ -46,6 +46,11 @@ void step_rover_physics(float *x,
     *dir_angle += *angular_speed * dt;
     float dx = cosf(*dir_angle) * *speed * dt;
     float dz = sinf(*dir_angle) * *speed * dt;
+    if (!scene) { // if null scene (as for odometry), skip collision checking
+        *x += dx;
+        *z += dz;
+        return;
+    }
     if (!can_move_in_dir(scene, x, z, dx, dz, collision_radius)) {
         *speed = 0.0f;
     }
