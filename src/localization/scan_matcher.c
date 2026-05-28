@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define CONVERGENCE_THRESHOLD (1e-2f)
+#define MAX_MATCH_DIST 1.0f
 
 typedef struct {
     int idx; // idx in PC array
@@ -24,6 +25,7 @@ typedef struct {
     const PointCloud *scan;
     const int axis;
 } KDSearchContext;
+
 
 static int compar(void *ctx, const void *a, const void *b) {
     KDSearchContext *search_ctx = (KDSearchContext *)ctx;
@@ -225,8 +227,13 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
 
             float error_x = Q[0][i] - P[0][i];
             float error_z = Q[1][i] - P[1][i];
-            error_sum += sqrtf(error_x * error_x + error_z * error_z);
+            float err = sqrtf(error_x * error_x + error_z * error_z);
 
+            if (err > MAX_MATCH_DIST) {
+                continue;
+            }
+
+            error_sum += err;
             mu_P[0] += P[0][i];
             mu_P[1] += P[1][i];
             mu_Q[0] += Q[0][i];
@@ -248,6 +255,11 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         for (int i = 0; i < n; i++) {
             float P_centred[2] = {P[0][i] - mu_P[0], P[1][i] - mu_P[1]};
             float Q_centred[2] = {Q[0][i] - mu_Q[0], Q[1][i] - mu_Q[1]};
+            float dx = Q_centred[0] - P_centred[0];
+            float dz = Q_centred[1] - P_centred[1];
+            if (sqrtf(dx * dx + dz * dz) > MAX_MATCH_DIST) {
+                continue;
+            }
             H[0][0] += P_centred[0] * Q_centred[0];
             H[0][1] += P_centred[0] * Q_centred[1];
             H[1][0] += P_centred[1] * Q_centred[0];
@@ -301,5 +313,6 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
     result.delta_theta = T_total[0];
     result.dx = T_total[1];
     result.dz = T_total[2];
+
     return result;
 }
