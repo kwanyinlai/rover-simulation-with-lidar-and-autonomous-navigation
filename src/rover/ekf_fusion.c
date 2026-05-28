@@ -13,7 +13,7 @@
 #define EKF_DEFAULT_ANGULAR_NOISE (5.0f * MATH_DEG_TO_RAD)
 #define EKF_DEFAULT_LIDAR_NOISE 0.2f
 #define EKF_DEFAULT_ANGLE_NOISE (10.0f * MATH_DEG_TO_RAD)
-#define ICP_CORRECTION_MAX_ITERS 10
+#define ICP_CORRECTION_MAX_ITERS 100
 
 /*
 static int g_synthetic_scan_cmd_fd = -1;
@@ -153,9 +153,9 @@ static void generate_synthetic_scan(KalmanFilter *ekf, float scan_theta, PointCl
 void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom_prediction) {
 
     float theta_prev = ekf->state.dir_angle;
-    float dx_prev = odom_prediction->origin.x - ekf->state.origin.x;
-    float dz_prev = odom_prediction->origin.z - ekf->state.origin.z;
-    float delta_theta = wrap_angle(odom_prediction->dir_angle - theta_prev);
+    float dx_prev = odom_prediction->origin.x;
+    float dz_prev = odom_prediction->origin.z;
+    float delta_theta = wrap_angle(odom_prediction->dir_angle);
 
     // line 2, g(u_t, µ_t−1): apply odometry control input to state estimate
 
@@ -255,6 +255,50 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
         for (int c = 0; c < EKF_STATE_DIM; c++) {
             I_minus_K_t[r][c] = (r == c ? 1.0f : 0.0f) - K_t[r][c];
             // r == c means diagonals
+        }
+    }
+    float Sigma_t[EKF_STATE_DIM][EKF_STATE_DIM];
+    matrix_mult(I_minus_K_t, ekf->Sigma, Sigma_t);
+    memcpy(ekf->Sigma, Sigma_t, sizeof(ekf->Sigma));
+}
+
+void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
+    if (!ekf || !icp) {
+        return;
+    }
+    if (!icp->converged || icp->error > 0.5f) {
+        return;
+    }
+
+    float Sigma_bar_plus_Q_t[EKF_STATE_DIM][EKF_STATE_DIM];
+    float Sigma_bar_plus_Q_t_inv[EKF_STATE_DIM][EKF_STATE_DIM];
+    float K_t[EKF_STATE_DIM][EKF_STATE_DIM];
+    matrix_add(ekf->Sigma, ekf->Q_t, Sigma_bar_plus_Q_t);
+    matrix_inverse(Sigma_bar_plus_Q_t, Sigma_bar_plus_Q_t_inv);
+    matrix_mult(ekf->Sigma, Sigma_bar_plus_Q_t_inv, K_t);
+
+    float z_t[EKF_STATE_DIM] = {
+        ekf->state.origin.x + icp->dx,
+        ekf->state.origin.z + icp->dz,
+        wrap_angle(ekf->state.dir_angle + icp->delta_theta)
+    };
+
+    float z_minus_h_mu_bar[EKF_STATE_DIM] = {
+        z_t[0] - ekf->state.origin.x,
+        z_t[1] - ekf->state.origin.z,
+        wrap_angle(z_t[2] - ekf->state.dir_angle)
+    };
+
+    ekf->state.origin.x += K_t[0][0]*z_minus_h_mu_bar[0] + K_t[0][1]*z_minus_h_mu_bar[1] + K_t[0][2]*z_minus_h_mu_bar[2];
+    ekf->state.origin.z += K_t[1][0]*z_minus_h_mu_bar[0] + K_t[1][1]*z_minus_h_mu_bar[1] + K_t[1][2]*z_minus_h_mu_bar[2];
+    ekf->state.dir_angle = wrap_angle(
+        ekf->state.dir_angle + K_t[2][0]*z_minus_h_mu_bar[0] + K_t[2][1]*z_minus_h_mu_bar[1] + K_t[2][2]*z_minus_h_mu_bar[2]
+    );
+
+    float I_minus_K_t[EKF_STATE_DIM][EKF_STATE_DIM];
+    for (int r = 0; r < EKF_STATE_DIM; r++) {
+        for (int c = 0; c < EKF_STATE_DIM; c++) {
+            I_minus_K_t[r][c] = (r == c ? 1.0f : 0.0f) - K_t[r][c];
         }
     }
     float Sigma_t[EKF_STATE_DIM][EKF_STATE_DIM];
