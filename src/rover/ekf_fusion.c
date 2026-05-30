@@ -150,12 +150,11 @@ static void generate_synthetic_scan(KalmanFilter *ekf, float scan_theta, PointCl
 
 // lines 2-3 of Table 3.3 in Probabilistic Robotics (Thrun et al.) EKF algorithm
 // µ¯_t = g(u_t, µ_t−1)
-void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, const SensorState *odom_prediction) {
-
+void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, float dx, float dz, float dtheta){
     float theta_prev = ekf->state.dir_angle;
-    float dx_prev = odom_prediction->origin.x;
-    float dz_prev = odom_prediction->origin.z;
-    float delta_theta = wrap_angle(odom_prediction->dir_angle);
+    float dx_prev = dx;
+    float dz_prev = dz;
+    float delta_theta = dtheta;
 
     // line 2, g(u_t, µ_t−1): apply odometry control input to state estimate
 

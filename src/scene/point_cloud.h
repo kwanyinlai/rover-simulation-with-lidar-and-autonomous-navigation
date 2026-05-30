@@ -61,6 +61,12 @@ void init_point_cloud(PointCloud *cloud);
 void point_cloud_clear(PointCloud *cloud);
 
 /**
+ * @brief Deep copy a point cloud into a destination container.
+ * @return 1 on success, 0 on failure.
+ */
+int point_cloud_copy(PointCloud *dst, const PointCloud *src);
+
+/**
  * @brief Age all points in the cloud and remove old points.
  * @param cloud The point cloud to update.
  * @param delta_time Time increment to add to each point's age.

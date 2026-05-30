@@ -1,5 +1,6 @@
 #include "scene/point_cloud.h"
 #include "piping/messages.h"
+#include <string.h>
 #define INIT_SIZE 32
 
 void init_point_cloud(PointCloud *pc) {
@@ -10,6 +11,21 @@ void init_point_cloud(PointCloud *pc) {
 
 void point_cloud_clear(PointCloud *pc) {
     pc->size = 0;
+}
+
+int point_cloud_copy(PointCloud *dst, const PointCloud *src) {
+    if (!dst || !src) return 0;
+
+    init_point_cloud(dst);
+
+    if (!(dst->data = malloc((size_t)src->size * sizeof(PointCloudEntry)))) {
+        return 0;
+    }
+
+    memcpy(dst->data, src->data, (size_t)src->size * sizeof(PointCloudEntry));
+    dst->size = src->size;
+    dst->capacity = src->size;
+    return 1;
 }
 
 void point_cloud_push_back(PointCloud *pc, Vector3 pos, float dist, float intensity) {

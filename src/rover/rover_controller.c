@@ -13,12 +13,15 @@
 #include "core/noise.h"
 #include "core/math_utils.h"
 #include "core/io_utils.h"
+#include "localization/scan_matcher.h"
 #include "rover/ekf_fusion.h"
 #include "rover/rover_physics.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <float.h>
+#include <stdlib.h>
+#include <pthread.h>
 #include <unistd.h>
 #include <string.h>
 #include "piping/messages.h"
@@ -36,11 +39,13 @@
 */
 
 #define MPPI_DT 0.05f // rollout timestep
-#define MPPI_LAMBDA 0.5f // temperature (0 = greedy, inf = uniform random)
+#define MPPI_LAMBDA 2.5f // temperature (0 = greedy, inf = uniform random)
 
 // control exploration noise, more noise = more exploration
-#define MPPI_SIGMA_STEER 0.45f
+#define MPPI_SIGMA_STEER 0.15f
 #define MPPI_SIGMA_THROTTLE 0.12f
+
+#define ICP_WORKER_MAX_ITERS 20
 
 // reference / saturation limits
 #define SPEED_REF (MAX_SPEED * 0.55f) // reference speed
@@ -61,6 +66,9 @@ static inline float clamp_throttle(float throttle) {
 #define PREDICTION_STEPS MPPI_HORIZON
 #define PREDICTION_DT MPPI_DT
 
+// for logging
+#define POSE_DIFF_LOG_INTERVAL (2.0f)
+
 // ====================================================================
 
 SensorState rover_pose = {0};
@@ -71,11 +79,67 @@ static int require_replan_write_fd = -1;
 static int replan_request_sent = 0;
 static int awaiting_replan_scan = 0;
 static float replan_scan_start_theta = 0.0f;
+static float replan_scan_last_theta = 0.0f;
+static float replan_scan_accumulated = 0.0f;
 static const float REPLAN_SCAN_TURN_RAD = 4 * M_PI;
 static int rollout_cmd_write_fd = -1;
 static int rollout_result_read_fd = -1;
 // EKF integration is temporarily disabled.
-static KalmanFilter g_pose_ekf;
+static KalmanFilter ekf_pose;
+static SensorState odom_pose = {0};
+static float g_pose_diff_log_accum = 0.0f;
+static SensorState prev_odom_pose = {0};
+
+typedef struct {
+    PointCloud current;
+    PointCloud reference;
+    int is_working;
+} ICPJob;
+
+typedef struct {
+    ICPResult result;
+    int is_job_complete;
+} ICPResultState;
+
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    ICPJob job;
+    ICPResultState result;
+} ICPContext;
+
+static ICPContext icp_res = {
+    /* mutex = */ PTHREAD_MUTEX_INITIALIZER,
+    /* cond = */ PTHREAD_COND_INITIALIZER,
+    /* ICPJob job = */ {0},
+    /* ICPResultState result = */ {0}
+};
+
+
+static void *icp_worker_main(void *arg) {
+    ICPContext *context = (ICPContext *)arg;
+    while (1) {
+        pthread_mutex_lock(&context->mutex);
+        while (!context->job.is_working) {
+            pthread_cond_wait(&context->cond, &context->mutex);
+        }
+        ICPJob job = context->job;
+        context->job.is_working = 0;
+        pthread_mutex_unlock(&context->mutex);
+
+        ICPResult result = run_icp(&job.current, &job.reference, ICP_WORKER_MAX_ITERS);
+
+        point_cloud_free(&job.current);
+        point_cloud_free(&job.reference);
+
+        pthread_mutex_lock(&context->mutex);
+        context->result.result = result;
+        context->result.is_job_complete = 1;
+        pthread_mutex_unlock(&context->mutex);
+    }
+    return NULL; // nothing to return
+}
+
 
 // nominal steer and throttle, warm started with previous frame'sim_state optimal
 static float nom_steer[MPPI_HORIZON];
@@ -95,6 +159,7 @@ static float trajectory_cost[MPPI_SAMPLES];
 #define W_THROTTLE_EFFORT 0.15f // penalise throttle usage
 #define W_TERMINAL_CROSS_TRACK 6.0f // terminal cost to heavily penalise ending far from path centre
 #define W_TERMINAL_HEADING 2.0f // terminal cost to penalise ending with heading error
+#define W_COLLISION 25.0f // penalty when movement is blocked by collision
 
 
 // waypoints
@@ -222,8 +287,8 @@ static float rollout_cost(int i)
         .x = rover_pose.origin.x,
         .z = rover_pose.origin.z,
         .dir_angle = rover_pose.dir_angle,
-        .speed = rover_pose.speed,
-        .angular_speed = rover_pose.angular_speed,
+        .speed = odom_pose.speed,
+        .angular_speed = odom_pose.angular_speed,
         .wp_idx = active_path.current
     };
 
@@ -270,12 +335,12 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                                                                 &nearest_segment);
         float heading_error = wrap_angle(sim_state.dir_angle - path_heading);
 
-        // allow skipping
+        float progress_reward = (float)(nearest_segment - sim_state.wp_idx);
+        // allow skipping within sim state not just relative to path
         if (nearest_segment > sim_state.wp_idx) {
             sim_state.wp_idx = nearest_segment;
         }
 
-        float progress_reward = (float)(nearest_segment - path->current);
         cost += W_CROSS_TRACK * (cross_track_error * cross_track_error)
               + W_HEADING * (heading_error * heading_error)
               + W_STEER_RATE * ((steer_cmd - prev_steer) * (steer_cmd - prev_steer))
@@ -285,6 +350,8 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
 
         prev_steer = steer_cmd;
 
+        float prev_x = sim_state.x;
+        float prev_z = sim_state.z;
         step_rover_physics(&sim_state.x,
                            &sim_state.z,
                            &sim_state.dir_angle,
@@ -295,6 +362,11 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                            MPPI_DT,
                            scene,
                            ROVER_COLLISION_RADIUS);
+
+        if (fabsf(sim_state.x - prev_x) + fabsf(sim_state.z - prev_z) < 1e-6f &&
+            fabsf(throttle_cmd) > 0.05f) { // control with no movement
+            cost += W_COLLISION; // heuristic weight penalisation instead of heavy computation
+        }
     }
 
     float path_heading;
@@ -339,8 +411,8 @@ static int evaluate_rollouts_via_pipe(void)
         .x = rover_pose.origin.x,
         .z = rover_pose.origin.z,
         .dir_angle = rover_pose.dir_angle,
-        .speed = rover_pose.speed,
-        .angular_speed = rover_pose.angular_speed,
+        .speed = odom_pose.speed,
+        .angular_speed = odom_pose.angular_speed,
         .wp_idx = active_path.current
     };
     request.path_snapshot = active_path;
@@ -439,6 +511,8 @@ void init_rover_controller(void) {
     rover_pose.dir_angle = 0.0f;
     rover_pose.speed = 0.0f;
     rover_pose.angular_speed = 0.0f;
+    odom_pose = rover_pose;
+    prev_odom_pose = rover_pose;
     active_path.count = 0;
     active_path.current = 0;
     rover_mode = MODE_MANUAL;
@@ -450,10 +524,23 @@ void init_rover_controller(void) {
         nom_throttle[i] = 0.35f;
     }
 
-    ekf_fusion_init(&g_pose_ekf, &rover_pose);
-}
+    ekf_fusion_init(&ekf_pose, &rover_pose);
 
+    icp_res.job = (ICPJob){0};
+    icp_res.result = (ICPResultState){0};
+    pthread_t icp_thread;
+    pthread_create(&icp_thread, NULL, icp_worker_main, &icp_res);
+    pthread_detach(icp_thread);
+}
 void update_odometry(float dt) {
+    g_pose_diff_log_accum += dt;
+    if (g_pose_diff_log_accum >= POSE_DIFF_LOG_INTERVAL) {
+        g_pose_diff_log_accum = 0.0f;
+        float dx = rover_pose.origin.x - odom_pose.origin.x;
+        float dz = rover_pose.origin.z - odom_pose.origin.z;
+        float dist_sqr = sqrtf(dx * dx + dz * dz);
+        fprintf(stderr, "pose diff sqr: %.3f m\n", dist_sqr);
+    }
     float throttle = get_throttle();
     float steer = get_steer();
 
@@ -466,35 +553,81 @@ void update_odometry(float dt) {
     if (steer != 0.0f) {
         steer_cmd += gaussian_noise() * ANGULAR_NOISE;
     }
-
-    SensorState odom_prediction = rover_pose;
-    step_rover_physics(&odom_prediction.origin.x,
-                       &odom_prediction.origin.z,
-                       &odom_prediction.dir_angle,
-                       &odom_prediction.speed,
-                       &odom_prediction.angular_speed,
+    // odom_pose not touched by EKF, purely dead reckoning from last frame's pose + control input, used for odometry delta in EKF prediction step
+    step_rover_physics(&odom_pose.origin.x,
+                       &odom_pose.origin.z,
+                       &odom_pose.dir_angle,
+                       &odom_pose.speed,
+                       &odom_pose.angular_speed,
                        throttle_cmd,
                        steer_cmd,
                        dt,
-                       &scene,
+                       NULL,
                        ROVER_COLLISION_RADIUS);
+    // ekf pred, advance uncertainty
+    ekf_fusion_predict_from_odometry(&ekf_pose,
+                                     odom_pose.origin.x - prev_odom_pose.origin.x,
+                                     odom_pose.origin.z - prev_odom_pose.origin.z,
+                                     odom_pose.dir_angle - prev_odom_pose.dir_angle);
+    rover_pose = *ekf_fusion_get_state(&ekf_pose);
 
-    ekf_fusion_predict_from_odometry(&g_pose_ekf, &odom_prediction);
-    const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
-    if (fused_state) {
-        rover_pose = *fused_state;
-    } else {
-        rover_pose = odom_prediction;
-    }
+    prev_odom_pose = odom_pose;
 }
 
 void update_lidar_fusion(const PointCloud *current_scan,
                          const PointCloud *reference_scan) {
-    ekf_fusion_update_from_lidar(&g_pose_ekf, cloud, scan_theta);
-    const SensorState *fused_state = ekf_fusion_get_state(&g_pose_ekf);
-    if (fused_state) {
-        rover_pose = *fused_state;
+
+    PointCloud current_copy = {0};
+    PointCloud reference_copy = {0};
+    if (current_scan->size <= 0 || reference_scan->size <= 0) {
+        return;
     }
+
+    pthread_mutex_lock(&icp_res.mutex);
+    int job_busy = icp_res.job.is_working;
+    pthread_mutex_unlock(&icp_res.mutex);
+
+    if (!job_busy) {
+
+        if (point_cloud_copy(&current_copy, current_scan) &&
+            point_cloud_copy(&reference_copy, reference_scan)) 
+        {
+
+            pthread_mutex_lock(&icp_res.mutex);
+            icp_res.job.current = current_copy;
+            icp_res.job.reference = reference_copy;
+            icp_res.job.is_working = 1;
+            pthread_cond_signal(&icp_res.cond);
+            pthread_mutex_unlock(&icp_res.mutex);
+        }
+        else{
+            point_cloud_free(&current_copy);
+            point_cloud_free(&reference_copy);
+        }
+    }
+
+    ICPResult icp = {0};
+    int is_job_complete = 0;
+    pthread_mutex_lock(&icp_res.mutex);
+    if (icp_res.result.is_job_complete) {
+        icp = icp_res.result.result;
+        icp_res.result.is_job_complete = 0;
+        is_job_complete = 1;
+    }
+    pthread_mutex_unlock(&icp_res.mutex);
+
+    if (is_job_complete) {
+        if (icp.converged) {
+            fprintf(stderr,
+                    "icp correction: err=%.3f d=(%.3f, %.3f, %.3f)\n",
+                    icp.error,
+                    icp.dx,
+                    icp.dz,
+                    icp.delta_theta);
+            ekf_fusion_correct_from_icp(&ekf_pose, &icp);
+        }
+    }
+    rover_pose = *ekf_fusion_get_state(&ekf_pose);
 }
 
 void update_path_follower(float dt) {
@@ -504,10 +637,16 @@ void update_path_follower(float dt) {
         if (!awaiting_replan_scan) {
             awaiting_replan_scan = 1;
             replan_scan_start_theta = get_scan_theta();
+            replan_scan_last_theta = replan_scan_start_theta;
+            replan_scan_accumulated = 0.0f;
         }
 
-        float scan_delta = get_scan_theta() - replan_scan_start_theta;
-        if (scan_delta < REPLAN_SCAN_TURN_RAD) {
+        float scan_theta = get_scan_theta();
+        float scan_delta = wrap_angle(scan_theta - replan_scan_last_theta);
+        replan_scan_accumulated += fabsf(scan_delta);
+        replan_scan_last_theta = scan_theta;
+
+        if (replan_scan_accumulated < REPLAN_SCAN_TURN_RAD) {
             set_throttle(0.0f);
             set_steer(0.0f);
             return;
@@ -563,6 +702,7 @@ void update_path_follower(float dt) {
     float final_dx = last->x - rover_pose.origin.x;
     float final_dz = last->z - rover_pose.origin.z;
     float final_dist_sq = final_dx * final_dx + final_dz * final_dz;
+
     // slow down for final waypoint
     if (active_path.current == active_path.count - 1 && final_dist_sq < WAYPOINT_REACH_THRESHOLD){
         throttle *= sqrtf(final_dist_sq) / 1.5f;
@@ -650,22 +790,23 @@ void render_predicted_path(void)
 
 void render_pose_error(void)
 {
-    const SensorState *truth = get_sensor_state();
-    float true_x = truth->origin.x, true_z = truth->origin.z;
     float pred_x = rover_pose.origin.x, pred_z = rover_pose.origin.z;
+    float odom_x = odom_pose.origin.x, odom_z = odom_pose.origin.z;
 
     glLineWidth(2.0f);
     glBegin(GL_LINES);
-    glColor3f(1.0f, 0.2f, 0.2f);
-    glVertex3f(true_x, 0.3f, true_z);
+    glColor3f(1.0f, 0.7f, 0.0f);
+    glVertex3f(odom_x, 0.3f, odom_z);
     glVertex3f(pred_x, 0.3f, pred_z);
     glEnd();
-    glLineWidth(1.0f);
 
+    glLineWidth(1.0f);
     glPointSize(10.0f);
     glBegin(GL_POINTS);
-    glColor3f(0.0f, 1.0f, 0.0f); glVertex3f(true_x, 0.3f, true_z);
-    glColor3f(0.0f, 0.0f, 1.0f); glVertex3f(pred_x, 0.3f, pred_z);
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(pred_x, 0.3f, pred_z);
+    glColor3f(1.0f, 0.7f, 0.0f);
+    glVertex3f(odom_x, 0.3f, odom_z);
     glEnd();
     glPointSize(1.0f);
 }
@@ -680,12 +821,12 @@ void render_waypoints(void)
     for (int i = active_path.current; i < active_path.count; i++) {
         float t = (float)(i - active_path.current) /
                   (float)(active_path.count - active_path.current);
-        glColor4f(0.3f, 0.8f, 0.6f, 1.0f - 0.5f*t);
+        glColor4f(0.3f, 0.8f, 0.6f, 1.0f - 0.5f * t);
         glVertex3f(active_path.waypoints[i].x, 0.25f, active_path.waypoints[i].z);
     }
     glEnd();
+    
     glLineWidth(1.0f);
-
     glPointSize(12.0f);
     glBegin(GL_POINTS);
     for (int i = active_path.current; i < active_path.count; i++) {
