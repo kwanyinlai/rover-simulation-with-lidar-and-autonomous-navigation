@@ -219,6 +219,7 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         float mu_P[2] = {0.0f, 0.0f};
         float mu_Q[2] = {0.0f, 0.0f};
         float error_sum = 0.0f;
+        int matched_count = 0;
 
         for (int i = 0; i < n; i++) {
             int nn = nearest_neighbor_kd(P[0][i], P[1][i], &tree);
@@ -238,13 +239,18 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
             mu_P[1] += P[1][i];
             mu_Q[0] += Q[0][i];
             mu_Q[1] += Q[1][i];
+            matched_count++;
+        }
+        if (matched_count <= 0) {
+            result.error = FLT_MAX;
+            break;
         }
 
-        result.error = error_sum / (float)n;
-        mu_P[0] /= n;
-        mu_P[1] /= n;
-        mu_Q[0] /= n;
-        mu_Q[1] /= n;
+        result.error = error_sum / (float)matched_count;
+        mu_P[0] /= matched_count;
+        mu_P[1] /= matched_count;
+        mu_Q[0] /= matched_count;
+        mu_Q[1] /= matched_count;
 
         // Cross-covariance matrix H between centered point sets P and Q
         // Build H = Sigma_i(p_i q_i^T)

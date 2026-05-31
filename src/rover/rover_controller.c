@@ -241,6 +241,10 @@ static float project_rover_to_path_segment(const Path *path,
         float dz = wp2_z - wp1_z;
         float len_sqr = dx * dx + dz * dz;
 
+        if (len_sqr < 1e-6f) {
+            continue;
+        }
+
         // project onto line segment
         float t = ((rover_x - wp1_x) * dx + (rover_z - wp1_z) * dz) / len_sqr;
         t = fmaxf(0.0f, fminf(1.0f, t));
@@ -395,6 +399,14 @@ void set_rollout_pipe_fds(int cmd_write_fd, int result_read_fd)
 void set_replan_pipe_fd(int write_fd)
 {
     require_replan_write_fd = write_fd;
+}
+
+void force_replan_request(void)
+{
+    active_path.current = active_path.count;
+    replan_request_sent = 0;
+    awaiting_replan_scan = 0;
+    replan_scan_accumulated = 0.0f;
 }
 
 static int evaluate_rollouts_via_pipe(void)

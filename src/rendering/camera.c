@@ -129,6 +129,11 @@ void keyboard(unsigned char key, int x, int y) {
             // clear stale controls
             set_throttle(0.0f);
             set_steer(0.0f);
+            break;
+        case 'r':
+        case 'R':
+            force_replan_request();
+            break;
 
     }
     glutPostRedisplay();

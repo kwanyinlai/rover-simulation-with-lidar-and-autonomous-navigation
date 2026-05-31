@@ -591,7 +591,7 @@ int main(int argc, char** argv) {
     glutMotionFunc(mouse_move);
 
     printf("mouse drag to orbit, +/- to zoom\n");
-    printf("WASD to drive, P to pause, F to toggle frontier visualization, G to toggle 3D occupancy map, T to toggle 2D occupancy map, V to toggle point cloud, C to toggle between driving modes\n");
+    printf("WASD to drive, P to pause, R to force replan, F to toggle frontier visualization, G to toggle 3D occupancy map, T to toggle 2D occupancy map, V to toggle point cloud, C to toggle between driving modes\n");
     glutShowWindow();
     glutMainLoop();
     return 0;

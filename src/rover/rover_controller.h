@@ -4,8 +4,8 @@
 #define ROVER_HEIGHT_CELLS 3
 
 // odometry noise
-#define SPEED_NOISE 0.1f
-#define ANGULAR_NOISE 0.1f
+#define SPEED_NOISE 0.03f
+#define ANGULAR_NOISE 0.02f
 
 
 #include "rendering/scene.h"
@@ -75,6 +75,11 @@ void update_lidar_fusion(const PointCloud *current_scan,
  * @param dt Simulation time step in seconds.
  */
 void update_path_follower(float dt);
+
+/**
+ * @brief Force current plan to complete so replanning can start.
+ */
+void force_replan_request(void);
 
 /**
  * @brief Replace active path with a new waypoint sequence.
