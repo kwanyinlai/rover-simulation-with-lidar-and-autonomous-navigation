@@ -111,6 +111,7 @@ void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
 
         for (int i = job.start_sample_idx; i < job.end_sample_idx; i++) {
             const RolloutRequest *request = &job.request;
+            int collided = 0;
             result.costs[i] = mppi_compute_rollout_cost(scene,
                                                         &request->path_snapshot,
                                                         request->init_state,
@@ -118,7 +119,9 @@ void run_rollout_worker_loop(int read_fd, int write_fd, TriangleArray *scene)
                                                         request->nom_steer,
                                                         request->nom_throttle,
                                                         request->steer_noise[i],
-                                                        request->throttle_noise[i]);
+                                                        request->throttle_noise[i],
+                                                        &collided);
+            result.collisions[i] = (unsigned char)(collided ? 1 : 0);
         }
 
         if (write_all(write_fd, &result, sizeof(RolloutResult)) < 0) {

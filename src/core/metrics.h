@@ -56,7 +56,6 @@ void log_icp_match(uint64_t match_id,
  * @param innov_y Measurement innovation in y
  * @param innov_h Measurement innovation in heading
  * @param nis Normalized Innovation Squared
- * @param mahalanobis Mahalanobis distance of the innovation
  * @param P_xx Diagonal posterior covariance entry for x (variance)
  * @param P_yy Diagonal posterior covariance entry for y (variance)
  * @param P_hh Diagonal posterior covariance entry for heading (variance)
@@ -66,7 +65,6 @@ void log_icp_match(uint64_t match_id,
  * @param true_x Ground-truth x
  * @param true_y Ground-truth y
  * @param true_h Ground-truth heading
- * @param accepted Boolean flag whether this measurement was accepted
  *
  */
 void log_ekf_update(uint64_t update_id,
@@ -76,7 +74,6 @@ void log_ekf_update(uint64_t update_id,
 							float innov_y,
 							float innov_h,
 							float nis,
-							float mahalanobis,
 							float P_xx,
 							float P_yy,
 							float P_hh,
@@ -85,8 +82,7 @@ void log_ekf_update(uint64_t update_id,
 							float est_h,
 							float true_x,
 							float true_y,
-							float true_h,
-							int accepted);
+							float true_h);
 
 /**
  * @brief Log MPPI step metrics and sample statistics

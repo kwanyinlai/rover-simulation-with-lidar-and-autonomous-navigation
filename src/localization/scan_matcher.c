@@ -1,8 +1,11 @@
 #include "localization/scan_matcher.h"
+#include "core/metrics.h"
+
 #include <math.h>
 #include <float.h>
 #include <stdlib.h>
 #include <string.h>
+
 
 #define CONVERGENCE_THRESHOLD (1e-2f)
 #define MAX_MATCH_DIST 1.0f
@@ -117,7 +120,7 @@ static void kd_nearest(const PointCloud *scan,
     if (node_index < 0) {
         return;
     }
-    KDNode *node = &nodes[node_index];
+    const KDNode *node = &nodes[node_index];
     Vector3 *p = &scan->data[node->idx].position;
     float dx = p->x - node_x;
     float dz = p->z - node_z;
@@ -128,9 +131,8 @@ static void kd_nearest(const PointCloud *scan,
         *best_idx = node->idx;
     }
 
-    int near_child, far_child, diff;
+    int near_child, far_child;
     if (node->axis == 0){
-        diff = dx;
         if (dx < 0.0f) {
             near_child = node->left;
             far_child = node->right;
@@ -140,7 +142,6 @@ static void kd_nearest(const PointCloud *scan,
         }
     }
     else {
-        diff = dz;
         if (dz < 0.0f) {
             near_child = node->left;
             far_child = node->right;
@@ -182,13 +183,15 @@ static int nearest_neighbor_kd(float node_x, float node_z, const KDTree *tree) {
 // - raw point cloud is expensive, may need to store spatial hash or something for fast NN search
 // - we are working with a static scene so this is effective but in real autonomous rovers scenes are generally dynamic
 //.  or at laeast slow moving
-
 // https://learnopencv.com/iterative-closest-point-icp-explained/
 ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
                   const PointCloud *reference_scan, // target: reference scan
                   int max_iterations) {
 
+    uint64_t match_id = next_icp_match_id();
+
     ICPResult result = {0};
+    result.match_id = match_id;
     int n = current_scan->size;
 
     float *P[2] = {malloc(n * sizeof(float)), malloc(n * sizeof(float))};
@@ -207,6 +210,11 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
     T_total[2] = 0.0f;
 
     float prev_error = FLT_MAX;
+    float initial_residual = FLT_MAX;
+    float final_residual = FLT_MAX;
+    int iterations = 0;
+    int total_considered = 0;
+    int total_rejected = 0;
     
 
     KDTree tree = build_kd_tree(reference_scan);
@@ -231,6 +239,7 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
             float err = sqrtf(error_x * error_x + error_z * error_z);
 
             if (err > MAX_MATCH_DIST) {
+                total_rejected++;
                 continue;
             }
 
@@ -241,12 +250,22 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
             mu_Q[1] += Q[1][i];
             matched_count++;
         }
+        total_considered += n;
         if (matched_count <= 0) {
             result.error = FLT_MAX;
+            // log iteration with zero correspondences
+            log_icp_iteration(match_id, iter, result.error, matched_count);
+            iterations = iter + 1;
+            final_residual = result.error;
             break;
         }
 
         result.error = error_sum / (float)matched_count;
+        if (initial_residual == FLT_MAX) {
+            initial_residual = result.error;
+        }
+        final_residual = result.error;
+        iterations = iter + 1;
         mu_P[0] /= matched_count;
         mu_P[1] /= matched_count;
         mu_Q[0] /= matched_count;
@@ -303,6 +322,8 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         T_total[2] += R_total[1][0] * t[0] + R_total[1][1] * t[1];
 
         // convergence check
+        log_icp_iteration(match_id, iter, result.error, matched_count);
+
         if (fabsf(prev_error - result.error) < CONVERGENCE_THRESHOLD) {
             result.converged = 1;
             break;
@@ -319,6 +340,15 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
     result.delta_theta = T_total[0];
     result.dx = T_total[1];
     result.dz = T_total[2];
+
+    float rejection_rate = 0.0f;
+    if (total_considered > 0) {
+        rejection_rate = (float)total_rejected / total_considered;
+    }
+    int accepted = result.converged ? 1 : 0;
+    result.accepted = accepted;
+    uint64_t ts_end = time_now_microsecs();
+    log_icp_match(match_id, ts_end, initial_residual, final_residual, iterations, rejection_rate, accepted);
 
     return result;
 }

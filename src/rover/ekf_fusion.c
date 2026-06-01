@@ -5,6 +5,7 @@
 #include "localization/scan_matcher.h"
 #include "lidar/sensor_control.h"
 #include "localization/scan_matcher.h"
+#include "core/metrics.h"
 
 #include <math.h>
 #include <string.h>
@@ -269,6 +270,9 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
         return;
     }
 
+    uint64_t update_id = next_ekf_update_id();
+    uint64_t ts = time_now_microsecs();
+
     float Sigma_bar_plus_Q_t[EKF_STATE_DIM][EKF_STATE_DIM];
     float Sigma_bar_plus_Q_t_inv[EKF_STATE_DIM][EKF_STATE_DIM];
     float K_t[EKF_STATE_DIM][EKF_STATE_DIM];
@@ -303,6 +307,48 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
     float Sigma_t[EKF_STATE_DIM][EKF_STATE_DIM];
     matrix_mult(I_minus_K_t, ekf->Sigma, Sigma_t);
     memcpy(ekf->Sigma, Sigma_t, sizeof(ekf->Sigma));
+
+    // logging metrics
+    float P_xx = ekf->Sigma[0][0];
+    float P_yy = ekf->Sigma[1][1];
+    float P_hh = ekf->Sigma[2][2];
+    const SensorState *true_state = get_sensor_state();
+    float est_x = ekf->state.origin.x;
+    float est_y = ekf->state.origin.z;
+    float est_h = ekf->state.dir_angle;
+    float true_x = true_state->origin.x;
+    float true_y = true_state->origin.z;
+    float true_h = true_state->dir_angle;
+    // S = innovation covariance = measurement noise with covariance Q + uncertainty with covariance Sigma_bar
+    // innovation = the difference between what the sensor returned and what the filter predicted
+    float S_inv[EKF_MEAS_DIM][EKF_MEAS_DIM];
+    matrix_inverse(Sigma_bar_plus_Q_t, S_inv);
+    float innov[3] = { z_minus_h_mu_bar[0], z_minus_h_mu_bar[1], z_minus_h_mu_bar[2] };
+    float S_inv_times_innov[3] = {0};
+    for (int r = 0; r < EKF_MEAS_DIM; r++) {
+        for (int c = 0; c < EKF_MEAS_DIM; c++) {
+            S_inv_times_innov[r] += S_inv[r][c] * innov[c];
+        }
+    }
+    // NIS = innovation^T * S^-1 * innovation
+    float nis = 0.0f;
+    // dot product = innov^T * (S_inv_times_innov)
+    for (int i = 0; i < EKF_MEAS_DIM; i++) nis += innov[i] * S_inv_times_innov[i];
+    uint64_t match_id = icp->match_id;
+    log_ekf_update(update_id, ts, match_id,
+                    z_minus_h_mu_bar[0],
+                    z_minus_h_mu_bar[1],
+                    z_minus_h_mu_bar[2],
+                    nis,
+                    P_xx,
+                    P_yy,
+                    P_hh,
+                    est_x,
+                    est_y,
+                    est_h,
+                    true_x,
+                    true_y,
+                    true_h);
 }
 
 

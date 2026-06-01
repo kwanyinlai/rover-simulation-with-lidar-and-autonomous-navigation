@@ -45,6 +45,7 @@ void set_rollout_pipe_fds(int cmd_write_fd, int result_read_fd);
  * @param nom_throttle Nominal throttle sequence.
  * @param steer_noise Steer perturbation sequence.
  * @param throttle_noise Throttle perturbation sequence.
+ * @param out_collision 1 if rollout collided, 0 otherwise
  * @return Total rollout cost (lower is better).
  */
 float mppi_compute_rollout_cost(const TriangleArray *scene,
@@ -54,7 +55,8 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                                 const float *nom_steer,
                                 const float *nom_throttle,
                                 const float *steer_noise,
-                                const float *throttle_noise);
+                                const float *throttle_noise,
+                                int *out_collision);
 
 /**
  * @brief Update dead-reckoned rover pose from current controls.

@@ -287,6 +287,7 @@ static void rollout_simulation(SimState *sim_state, float throttle, float steer,
 
 static float rollout_cost(int i)
 {
+    int collided = 0;
     SimState init_state = {
         .x = rover_pose.origin.x,
         .z = rover_pose.origin.z,
@@ -303,7 +304,8 @@ static float rollout_cost(int i)
                                      nom_steer,
                                      nom_throttle,
                                      steer_noise[i],
-                                     throttle_noise[i]);
+                                     throttle_noise[i],
+                                     &collided);
 }
 
 float mppi_compute_rollout_cost(const TriangleArray *scene,
@@ -313,11 +315,13 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                                 const float *nom_steer_seq,
                                 const float *nom_throttle_seq,
                                 const float *steer_noise_seq,
-                                const float *throttle_noise_seq)
+                                const float *throttle_noise_seq,
+                                int *out_collision)
 {
     SimState sim_state = init_state;
     float cost = 0.0f;
     float prev_steer = nom_steer_seq[0];
+    int collided = 0;
 
     for (int j = 0; j < horizon; j++) {
         float steer_cmd = clamp_steer(nom_steer_seq[j] + steer_noise_seq[j]);
@@ -370,6 +374,7 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
         if (fabsf(sim_state.x - prev_x) + fabsf(sim_state.z - prev_z) < 1e-6f &&
             fabsf(throttle_cmd) > 0.05f) { // control with no movement
             cost += W_COLLISION; // heuristic weight penalisation instead of heavy computation
+            collided = 1;
         }
     }
 
@@ -385,6 +390,10 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
 
     cost += W_TERMINAL_CROSS_TRACK * (terminal_cross_track_error * terminal_cross_track_error)
           + W_TERMINAL_HEADING * (terminal_heading_error * terminal_heading_error);
+
+    if (out_collision) {
+        *out_collision = collided;
+    }
 
     return cost;
 }
@@ -548,10 +557,6 @@ void update_odometry(float dt) {
     g_pose_diff_log_accum += dt;
     if (g_pose_diff_log_accum >= POSE_DIFF_LOG_INTERVAL) {
         g_pose_diff_log_accum = 0.0f;
-        float dx = rover_pose.origin.x - odom_pose.origin.x;
-        float dz = rover_pose.origin.z - odom_pose.origin.z;
-        float dist_sqr = sqrtf(dx * dx + dz * dz);
-        fprintf(stderr, "pose diff sqr: %.3f m\n", dist_sqr);
     }
     float throttle = get_throttle();
     float steer = get_steer();
@@ -630,12 +635,6 @@ void update_lidar_fusion(const PointCloud *current_scan,
 
     if (is_job_complete) {
         if (icp.converged) {
-            fprintf(stderr,
-                    "icp correction: err=%.3f d=(%.3f, %.3f, %.3f)\n",
-                    icp.error,
-                    icp.dx,
-                    icp.dz,
-                    icp.delta_theta);
             ekf_fusion_correct_from_icp(&ekf_pose, &icp);
         }
     }
@@ -693,7 +692,7 @@ void update_path_follower(float dt) {
                                          rover_pose.origin.z,
                                          active_path.count);
     if (active_path.current > prev_waypoint_idx) {
-        printf("Waypoint %d reached\n", active_path.current - 1);
+        /* waypoint reached - console print removed to avoid noisy stdout */
     }
 
     if (active_path.current >= active_path.count) {
@@ -715,10 +714,12 @@ void update_path_follower(float dt) {
     float final_dz = last->z - rover_pose.origin.z;
     float final_dist_sq = final_dx * final_dx + final_dz * final_dz;
 
-    // slow down for final waypoint
+    // slow down for final waypoint (disabled - deceleration not needed)
+    /*
     if (active_path.current == active_path.count - 1 && final_dist_sq < WAYPOINT_REACH_THRESHOLD){
         throttle *= sqrtf(final_dist_sq) / 1.5f;
     }
+    */
 
     set_steer(steer);
     set_throttle(throttle);

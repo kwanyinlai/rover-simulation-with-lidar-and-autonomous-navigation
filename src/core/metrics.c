@@ -51,7 +51,7 @@ void metrics_init(void) {
     pthread_mutex_lock(&ekf_update_lock);
     ekf_update_log = fopen("ekf_updates.csv", "w");
     setvbuf(ekf_update_log, NULL, _IOFBF, METRICS_BUFSIZE);
-    fprintf(ekf_update_log, "update_id,ts_microsecs,match_id,innov_x,innov_y,innov_h,nis,mahalanobis,P_xx,P_yy,P_hh,est_x,est_y,est_h,true_x,true_y,true_h,accepted\n");
+    fprintf(ekf_update_log, "update_id,ts_microsecs,match_id,innov_x,innov_y,innov_h,nis,P_xx,P_yy,P_hh,est_x,est_y,est_h,true_x,true_y,true_h\n");
     pthread_mutex_unlock(&ekf_update_lock);
 
     pthread_mutex_lock(&mppi_lock);
@@ -163,7 +163,6 @@ void log_ekf_update(uint64_t update_id,
                             float innov_y,
                             float innov_h,
                             float nis,
-                            float mahalanobis,
                             float P_xx,
                             float P_yy,
                             float P_hh,
@@ -172,22 +171,19 @@ void log_ekf_update(uint64_t update_id,
                             float est_h,
                             float true_x,
                             float true_y,
-                            float true_h,
-                            int accepted) {
+                            float true_h) {
     if (!ekf_update_log) metrics_init();
     pthread_mutex_lock(&ekf_update_lock);
     fprintf(ekf_update_log,
-        "%llu,%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d\n",
-        update_id,
-        ts_microsecs,
-        match_id,
-        innov_x, innov_y, innov_h,
-        nis,
-        mahalanobis,
-        P_xx, P_yy, P_hh,
-        est_x, est_y, est_h,
-        true_x, true_y, true_h,
-        accepted);
+            "%llu,%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            update_id,
+            ts_microsecs,
+            match_id,
+            innov_x, innov_y, innov_h,
+            nis,
+            P_xx, P_yy, P_hh,
+            est_x, est_y, est_h,
+            true_x, true_y, true_h);
     pthread_mutex_unlock(&ekf_update_lock);
 }
 

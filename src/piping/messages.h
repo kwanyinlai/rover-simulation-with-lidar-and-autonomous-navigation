@@ -110,10 +110,12 @@ typedef struct {
     int start_sample_idx;
     int end_sample_idx;
     float costs[MPPI_SAMPLES];
+    unsigned char collisions[MPPI_SAMPLES];
 } RolloutResult;
 
 typedef struct {
     float costs[MPPI_SAMPLES];
+    unsigned char collisions[MPPI_SAMPLES];
 } BatchedRolloutResult;
 
 

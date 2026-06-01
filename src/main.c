@@ -21,6 +21,7 @@
 #include "rover/rover_controller.h"
 #include "rover/ekf_fusion.h"
 #include "localization/scan_matcher.h"
+#include "core/metrics.h"
 
 #define ICP_MAX_ITERATIONS 20
 #define ICP_REVOLUTIONS_PER_UPDATE 1
