@@ -558,6 +558,8 @@ void reshape(int w, int h) {
 
 
 int main(int argc, char** argv) {
+    metrics_init();
+
     signal(SIGINT, handle_sigint);
     signal(SIGTERM, handle_sigint);
 
@@ -571,7 +573,6 @@ int main(int argc, char** argv) {
     build_scene(&scene);
     init_occupancy_map(&occupancy_grid_3d, 300, 60, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
     init_occupancy_map(&occupancy_grid_2d, 300, 1, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
-
     create_workers();
     // x from -15 to 15, y from 0 to 6, z from -12 to 12, with 0.1m resolution, gives us a 300x60x240 grid
     glutInit(&argc, argv);

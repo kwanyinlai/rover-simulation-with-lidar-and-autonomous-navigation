@@ -4,10 +4,16 @@
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 // buffering config
 #define METRICS_BUFSIZE (64 * 1024) // 64KB buffer for each log file
 #define ICP_ITER_LOG_FREQ 1 // log every N iters
+
+// logging
+#define METRICS_RUN_ID 1
+#define STR(x) #x
+#define XSTR(x) STR(x)
 
 static FILE *icp_match_log;
 static FILE *icp_iters_log;
@@ -30,6 +36,7 @@ static uint64_t next_id_mppi_step = 1;
 static int metrics_initialized = 0; // guard to prev double initialisation
 
 void metrics_init(void) {
+    // fprintf(stderr, "metrics_init called from pid %d\n", getpid());
     pthread_mutex_lock(&metrics_init_lock);
     if (metrics_initialized) {
         pthread_mutex_unlock(&metrics_init_lock);
@@ -37,37 +44,43 @@ void metrics_init(void) {
     }
 
     pthread_mutex_lock(&icp_match_lock);
-    icp_match_log = fopen("icp_matches.csv", "w");
+    icp_match_log = fopen("logs/icp_matches_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(icp_match_log, NULL, _IOFBF, METRICS_BUFSIZE);
     fprintf(icp_match_log, "match_id,ts_microsecs,initial_residual,final_residual,iters,rejection_rate,accepted\n");
     pthread_mutex_unlock(&icp_match_lock);
 
     pthread_mutex_lock(&icp_iters_lock);
-    icp_iters_log = fopen("icp_iters.csv", "w");
+    icp_iters_log = fopen("logs/icp_iters_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(icp_iters_log, NULL, _IOFBF, METRICS_BUFSIZE);
     fprintf(icp_iters_log, "match_id,iter,residual,match_count\n");
     pthread_mutex_unlock(&icp_iters_lock);
 
     pthread_mutex_lock(&ekf_update_lock);
-    ekf_update_log = fopen("ekf_updates.csv", "w");
+    ekf_update_log = fopen("logs/ekf_updates_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(ekf_update_log, NULL, _IOFBF, METRICS_BUFSIZE);
     fprintf(ekf_update_log, "update_id,ts_microsecs,match_id,innov_x,innov_y,innov_h,nis,P_xx,P_yy,P_hh,est_x,est_y,est_h,true_x,true_y,true_h\n");
     pthread_mutex_unlock(&ekf_update_lock);
 
     pthread_mutex_lock(&mppi_lock);
-    mppi_log = fopen("mppi_steps.csv", "w");
+    mppi_log = fopen("logs/mppi_steps_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(mppi_log, NULL, _IOFBF, METRICS_BUFSIZE);
     fprintf(mppi_log, "step_id,ts_microsecs,cost_mean,cost_variance,cost_min,collision_rate,ess,cross_track_error,compute_time_microsecs,waypoint_id\n");
     pthread_mutex_unlock(&mppi_lock);
 
     pthread_mutex_lock(&rover_gt_lock);
-    rover_ground_truth_log = fopen("rover_ground_truth.csv", "w");
+    rover_ground_truth_log = fopen("logs/rover_ground_truth_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(rover_ground_truth_log, NULL, _IOFBF, METRICS_BUFSIZE);
     fprintf(rover_ground_truth_log, "ts_microsecs,true_x,true_y,true_heading,est_x,est_y,est_heading,error_x,error_y,error_heading\n");
     pthread_mutex_unlock(&rover_gt_lock);
 
     metrics_initialized = 1;
     pthread_mutex_unlock(&metrics_init_lock);
+    fflush(icp_match_log);
+    fflush(icp_iters_log);
+    fflush(ekf_update_log);
+    fflush(mppi_log);
+    fflush(rover_ground_truth_log);
+
 }
 
 void metrics_close(void) {
@@ -121,7 +134,6 @@ uint64_t next_mppi_step_id(void) {
 
 
 void log_icp_iteration(uint64_t match_id, int iter_no, float residual, int match_count) {
-    if (!icp_iters_log) metrics_init();
     if (iter_no % ICP_ITER_LOG_FREQ != 0) return;
     pthread_mutex_lock(&icp_iters_lock);
     fprintf(icp_iters_log, "%llu,%d,%.6f,%d\n", 
@@ -141,7 +153,6 @@ void log_icp_match(uint64_t match_id,
                            int convergence_iters,
                            float rejection_rate,
                            int accepted) {
-    if (!icp_match_log) metrics_init();
     pthread_mutex_lock(&icp_match_lock);
     fprintf(icp_match_log, "%llu,%llu,%.6f,%.6f,%d,%.6f,%d\n",
         match_id,
@@ -172,7 +183,6 @@ void log_ekf_update(uint64_t update_id,
                             float true_x,
                             float true_y,
                             float true_h) {
-    if (!ekf_update_log) metrics_init();
     pthread_mutex_lock(&ekf_update_lock);
     fprintf(ekf_update_log,
             "%llu,%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
@@ -198,7 +208,6 @@ void log_mppi_step(uint64_t step_id,
                            float cross_track_error,
                            uint64_t compute_time_microsecs,
                            int waypoint_id) {
-    if (!mppi_log) metrics_init();
     pthread_mutex_lock(&mppi_lock);
     fprintf(mppi_log, "%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%d\n",
         step_id,
@@ -219,7 +228,6 @@ void log_mppi_step(uint64_t step_id,
 void log_rover_ground_truth(uint64_t ts_microsecs,
                                     const SensorState *true_state,
                                     const SensorState *estimate_state) {
-    if (!rover_ground_truth_log) metrics_init();
     float err_x = estimate_state->origin.x - true_state->origin.x;
     float err_y = estimate_state->origin.z - true_state->origin.z;
     float err_h = estimate_state->dir_angle - true_state->dir_angle;

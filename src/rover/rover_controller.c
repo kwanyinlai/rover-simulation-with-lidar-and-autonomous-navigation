@@ -16,6 +16,7 @@
 #include "localization/scan_matcher.h"
 #include "rover/ekf_fusion.h"
 #include "rover/rover_physics.h"
+#include "core/metrics.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -89,6 +90,8 @@ static KalmanFilter ekf_pose;
 static SensorState odom_pose = {0};
 static float g_pose_diff_log_accum = 0.0f;
 static SensorState prev_odom_pose = {0};
+static int rollout_has_collided[MPPI_SAMPLES];
+
 
 typedef struct {
     PointCloud current;
@@ -297,15 +300,18 @@ static float rollout_cost(int i)
         .wp_idx = active_path.current
     };
 
-    return mppi_compute_rollout_cost(&scene,
-                                     &active_path,
-                                     init_state,
-                                     MPPI_HORIZON,
-                                     nom_steer,
-                                     nom_throttle,
-                                     steer_noise[i],
-                                     throttle_noise[i],
-                                     &collided);
+    float cost = mppi_compute_rollout_cost(&scene,
+                              &active_path,
+                              init_state,
+                              MPPI_HORIZON,
+                              nom_steer,
+                              nom_throttle,
+                              steer_noise[i],
+                              throttle_noise[i],
+                              &collided);
+    rollout_has_collided[i] = collided;
+    return cost;
+                              
 }
 
 float mppi_compute_rollout_cost(const TriangleArray *scene,
@@ -509,6 +515,43 @@ static void mppi_update(void){
         nom_steer[j] = clamp_steer(nom_steer[j] + delta_steer);
         nom_throttle[j] = clamp_throttle(nom_throttle[j] + delta_throttle);
     }
+    uint64_t step_id = next_mppi_step_id();
+    uint64_t ts = time_now_microsecs();
+    float cost_mean = 0.0f;
+    for (int i = 0; i < MPPI_SAMPLES; i++) cost_mean += trajectory_cost[i];
+    cost_mean /= MPPI_SAMPLES;
+
+    float cost_variance = 0.0f;
+    for (int i = 0; i < MPPI_SAMPLES; i++) {
+        float d = trajectory_cost[i] - cost_mean;
+        cost_variance += d * d;
+    }
+    cost_variance /= MPPI_SAMPLES;
+
+    int collision_count = 0;
+    for (int i = 0; i < MPPI_SAMPLES; i++) collision_count += rollout_has_collided[i];
+    float collision_rate = (float)collision_count / MPPI_SAMPLES;
+
+    float ess = 0.0f; // effective sample size = 1 / sum(w^2)
+    float sum_w2 = 0.0f;
+    for (int i = 0; i < MPPI_SAMPLES; i++) {
+        float w = weights[i] / weighted_sum;
+        sum_w2 += w * w;
+    }
+    ess = 1.0f / sum_w2;
+
+    float path_heading;
+    int nearest_seg;
+    float cte = project_rover_to_path_segment(&active_path,
+                                              rover_pose.origin.x,
+                                              rover_pose.origin.z,
+                                              active_path.current,
+                                              &path_heading,
+                                              &nearest_seg);
+
+    log_mppi_step(step_id, ts, cost_mean, cost_variance, min_cost,
+                  collision_rate, ess, cte, 0, active_path.current);
+
 }
 
 
@@ -589,6 +632,9 @@ void update_odometry(float dt) {
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 
     prev_odom_pose = odom_pose;
+
+    const SensorState *true_state = get_sensor_state();
+    log_rover_ground_truth(time_now_microsecs(), true_state, &rover_pose);
 }
 
 void update_lidar_fusion(const PointCloud *current_scan,
