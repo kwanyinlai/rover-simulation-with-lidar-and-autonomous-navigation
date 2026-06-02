@@ -35,21 +35,29 @@
 
 // defined partially in rover_controller.h
 /*
-#define MPPI_SAMPLES 32 // parallel rollouts per frame
-#define MPPI_HORIZON 24 // steps per rollout
+#define MPPI_SAMPLES 64 // parallel rollouts per frame
+#define MPPI_HORIZON 40 // steps per rollout
 */
 
+#ifndef MPPI_LAMBDA
+#define MPPI_LAMBDA 4.0f 
+#endif // temperature (0 = greedy, inf = uniform random)
+
 #define MPPI_DT 0.05f // rollout timestep
-#define MPPI_LAMBDA 2.5f // temperature (0 = greedy, inf = uniform random)
 
 // control exploration noise, more noise = more exploration
-#define MPPI_SIGMA_STEER 0.15f
-#define MPPI_SIGMA_THROTTLE 0.12f
+#ifndef MPPI_SIGMA_STEER
+#define MPPI_SIGMA_STEER 0.5f
+#endif
+
+#ifndef MPPI_SIGMA_THROTTLE
+#define MPPI_SIGMA_THROTTLE 0.5f
+#endif
 
 #define ICP_WORKER_MAX_ITERS 20
 
 // reference / saturation limits
-#define SPEED_REF (MAX_SPEED * 0.55f) // reference speed
+#define SPEED_REF (MAX_SPEED * 0.85f) // reference speed
 #define STEER_MIN -1.0f
 #define STEER_MAX 1.0f
 #define THROTTLE_MIN 0.0f
@@ -157,12 +165,12 @@ static float trajectory_cost[MPPI_SAMPLES];
 // rollout cost weights
 #define W_CROSS_TRACK 3.5f // penalise distancing from path centre
 #define W_HEADING 1.2f // penalise heading vs path tangent
-#define W_STEER_RATE 2.0f // penalise changes in steering
+#define W_STEER_RATE 3.0f // penalise changes in steering
 #define W_SPEED 0.3f // penalise changes from desired speed
 #define W_THROTTLE_EFFORT 0.15f // penalise throttle usage
-#define W_TERMINAL_CROSS_TRACK 6.0f // terminal cost to heavily penalise ending far from path centre
-#define W_TERMINAL_HEADING 2.0f // terminal cost to penalise ending with heading error
-#define W_COLLISION 25.0f // penalty when movement is blocked by collision
+#define W_TERMINAL_CROSS_TRACK 2.5f // terminal cost to heavily penalise ending far from path centre
+#define W_TERMINAL_HEADING 1.0f // terminal cost to penalise ending with heading error
+#define W_COLLISION 50.0f // penalty when movement is blocked by collision
 
 
 // waypoints
@@ -550,7 +558,7 @@ static void mppi_update(void){
                                               &nearest_seg);
 
     log_mppi_step(step_id, ts, cost_mean, cost_variance, min_cost,
-                  collision_rate, ess, cte, 0, active_path.current);
+                  ess, cte);
 
 }
 
@@ -579,7 +587,7 @@ void init_rover_controller(void) {
     prev_odom_pose = rover_pose;
     active_path.count = 0;
     active_path.current = 0;
-    rover_mode = MODE_MANUAL;
+    rover_mode = MODE_AUTO;
     replan_request_sent = 0;
 
     memset(nom_steer, 0, sizeof(nom_steer));

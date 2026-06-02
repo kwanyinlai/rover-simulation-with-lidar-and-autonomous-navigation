@@ -1,4 +1,5 @@
 #include "core/metrics.h"
+#include "core/math_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,10 @@
 #define ICP_ITER_LOG_FREQ 1 // log every N iters
 
 // logging
+#ifndef METRICS_RUN_ID
 #define METRICS_RUN_ID 1
+#endif
+
 #define STR(x) #x
 #define XSTR(x) STR(x)
 
@@ -64,7 +68,7 @@ void metrics_init(void) {
     pthread_mutex_lock(&mppi_lock);
     mppi_log = fopen("logs/mppi_steps_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(mppi_log, NULL, _IOFBF, METRICS_BUFSIZE);
-    fprintf(mppi_log, "step_id,ts_microsecs,cost_mean,cost_variance,cost_min,collision_rate,ess,cross_track_error,compute_time_microsecs,waypoint_id\n");
+    fprintf(mppi_log, "step_id,ts_microsecs,cost_mean,cost_variance,cost_min,ess,cross_track_error\n");
     pthread_mutex_unlock(&mppi_lock);
 
     pthread_mutex_lock(&rover_gt_lock);
@@ -203,23 +207,17 @@ void log_mppi_step(uint64_t step_id,
                            float cost_mean,
                            float cost_variance,
                            float cost_min,
-                           float collision_rate,
                            float ess,
-                           float cross_track_error,
-                           uint64_t compute_time_microsecs,
-                           int waypoint_id) {
+                           float cross_track_error) {
     pthread_mutex_lock(&mppi_lock);
-    fprintf(mppi_log, "%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%d\n",
+    fprintf(mppi_log, "%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f\n",
         step_id,
         ts_microsecs,
         cost_mean,
         cost_variance,
         cost_min,
-        collision_rate,
         ess,
-        cross_track_error,
-        compute_time_microsecs,
-        waypoint_id
+        cross_track_error
     );
     pthread_mutex_unlock(&mppi_lock);
 }
@@ -230,7 +228,7 @@ void log_rover_ground_truth(uint64_t ts_microsecs,
                                     const SensorState *estimate_state) {
     float err_x = estimate_state->origin.x - true_state->origin.x;
     float err_y = estimate_state->origin.z - true_state->origin.z;
-    float err_h = estimate_state->dir_angle - true_state->dir_angle;
+    float err_h = wrap_angle(estimate_state->dir_angle - true_state->dir_angle);
     pthread_mutex_lock(&rover_gt_lock);
     fprintf(rover_ground_truth_log, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
         ts_microsecs,

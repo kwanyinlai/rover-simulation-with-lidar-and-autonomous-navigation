@@ -91,11 +91,8 @@ void log_ekf_update(uint64_t update_id,
  * @param cost_mean Mean cost across the sampled trajectories
  * @param cost_variance Variance of the costs across samples
  * @param cost_min Minimum cost observed among samples
- * @param collision_rate Fraction of sampled trajectories that collided with scene geometry
  * @param ess Effective sample size (ESS = 1 / sum(weight_k^2)
  * @param cross_track_error Lateral deviation from planned path
- * @param compute_time_us CPU time taken to compute this step (microseconds)
- * @param waypoint_id Targetted waypoint ID
  *
  */
 void log_mppi_step(uint64_t step_id,
@@ -103,11 +100,8 @@ void log_mppi_step(uint64_t step_id,
 				   float cost_mean,
 				   float cost_variance,
 				   float cost_min,
-				   float collision_rate,
 				   float ess,
-				   float cross_track_error,
-				   uint64_t compute_time_us,
-				   int waypoint_id);
+				   float cross_track_error);
 
 /**
  * @brief Log ground-truth and estimator states and per-axis errors (speed disrrregarded from 

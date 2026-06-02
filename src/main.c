@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+
 #include "core/io_utils.h"
 #include "core/vec3.h"
 #include "rendering/scene.h"
@@ -32,6 +34,9 @@ PointCloud cloud;
 OccupancyMap occupancy_grid_3d;
 OccupancyMap occupancy_grid_2d;
 ScanState scan_state;
+
+static float g_duration_seconds = -1.0f; // -1 means run forever
+static float g_elapsed_seconds = 0.0f;
 
 static float last_time = 0.0f;
 extern int is_render_scene;
@@ -488,6 +493,17 @@ void display() {
     float current_time = glutGet(GLUT_ELAPSED_TIME) / 1000.0f; 
     float delta_time = current_time - last_time;
     last_time = current_time;
+
+    if (g_duration_seconds > 0.0f) {
+        g_elapsed_seconds += delta_time;
+        if (g_elapsed_seconds >= g_duration_seconds) {
+            metrics_close();
+            if (scan_coord_pid > 0) kill(scan_coord_pid, SIGTERM);
+            if (rollout_coord_pid > 0) kill(rollout_coord_pid, SIGTERM);
+            exit(0);
+        }
+    }
+
     // BG
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -558,6 +574,12 @@ void reshape(int w, int h) {
 
 
 int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
+            g_duration_seconds = (float)atof(argv[i + 1]);
+        }
+    }
+
     metrics_init();
 
     signal(SIGINT, handle_sigint);
