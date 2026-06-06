@@ -134,20 +134,20 @@ static void kd_nearest(const PointCloud *scan,
     int near_child, far_child;
     if (node->axis == 0){
         if (dx < 0.0f) {
-            near_child = node->left;
-            far_child = node->right;
-        } else {
             near_child = node->right;
-            far_child = node->left;
+            far_child  = node->left;
+        } else {
+            near_child = node->left;
+            far_child  = node->right;
         }
     }
     else {
         if (dz < 0.0f) {
-            near_child = node->left;
-            far_child = node->right;
-        } else {
             near_child = node->right;
-            far_child = node->left;
+            far_child  = node->left;
+        } else {
+            near_child = node->left;
+            far_child  = node->right;
         }
     }
 
@@ -278,13 +278,13 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         float H[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
 
         for (int i = 0; i < n; i++) {
+            float dx = Q[0][i] - P[0][i];
+            float dz = Q[1][i] - P[1][i];
+            if (sqrtf(dx * dx + dz * dz) > MAX_MATCH_DIST) {
+                continue; // skip the same outliers that the centroid loop skipped
+            }
             float P_centred[2] = {P[0][i] - mu_P[0], P[1][i] - mu_P[1]};
             float Q_centred[2] = {Q[0][i] - mu_Q[0], Q[1][i] - mu_Q[1]};
-            float dx = Q_centred[0] - P_centred[0];
-            float dz = Q_centred[1] - P_centred[1];
-            if (sqrtf(dx * dx + dz * dz) > MAX_MATCH_DIST) {
-                continue;
-            }
             H[0][0] += P_centred[0] * Q_centred[0];
             H[0][1] += P_centred[0] * Q_centred[1];
             H[1][0] += P_centred[1] * Q_centred[0];
@@ -295,8 +295,7 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         float R[2][2] = {{ cosf(theta), -sinf(theta) },
                          { sinf(theta),  cosf(theta) }}; // build rotation matrix
 
-        // translation vector, t
-        // t = mu_Q - R * mu_P
+        // translation vector, t = mu_Q - R * mu_P
         float t[2] = {
             mu_Q[0] - (R[0][0] * mu_P[0] + R[0][1] * mu_P[1]),
             mu_Q[1] - (R[1][0] * mu_P[0] + R[1][1] * mu_P[1])
@@ -307,7 +306,7 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
             float R_p_i[2] = {
                 R[0][0] * P[0][i] + R[0][1] * P[1][i],
                 R[1][0] * P[0][i] + R[1][1] * P[1][i]
-            }; // apply rotation
+            };
             P[0][i] = R_p_i[0] + t[0];
             P[1][i] = R_p_i[1] + t[1];
         }
