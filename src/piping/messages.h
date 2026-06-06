@@ -11,8 +11,12 @@
 #define NUM_RINGS 256
 
 // MPPI hyperparameters
-#define MPPI_SAMPLES 64
-#define MPPI_HORIZON 40
+#ifndef MPPI_SAMPLES
+#define MPPI_SAMPLES 256
+#endif
+#ifndef MPPI_HORIZON
+#define MPPI_HORIZON 80
+#endif
 
 typedef enum {
     UNKNOWN = 0,

@@ -47,17 +47,17 @@
 
 // control exploration noise, more noise = more exploration
 #ifndef MPPI_SIGMA_STEER
-#define MPPI_SIGMA_STEER 0.5f
+#define MPPI_SIGMA_STEER 1.5f
 #endif
 
 #ifndef MPPI_SIGMA_THROTTLE
-#define MPPI_SIGMA_THROTTLE 0.5f
+#define MPPI_SIGMA_THROTTLE 1.5f
 #endif
 
 #define ICP_WORKER_MAX_ITERS 20
 
 // reference / saturation limits
-#define SPEED_REF (MAX_SPEED * 0.85f) // reference speed
+#define SPEED_REF (MAX_SPEED * 0.95f)
 #define STEER_MIN -1.0f
 #define STEER_MAX 1.0f
 #define THROTTLE_MIN 0.0f
@@ -70,13 +70,6 @@ static inline float clamp_steer(float steer) {
 static inline float clamp_throttle(float throttle) {
     return fmaxf(THROTTLE_MIN, fminf(THROTTLE_MAX, throttle));
 }
-
-// for rendering predictions
-#define PREDICTION_STEPS MPPI_HORIZON
-#define PREDICTION_DT MPPI_DT
-
-// for logging
-#define POSE_DIFF_LOG_INTERVAL (2.0f)
 
 // ====================================================================
 
@@ -93,10 +86,8 @@ static float replan_scan_accumulated = 0.0f;
 static const float REPLAN_SCAN_TURN_RAD = 4 * M_PI;
 static int rollout_cmd_write_fd = -1;
 static int rollout_result_read_fd = -1;
-// EKF integration is temporarily disabled.
 static KalmanFilter ekf_pose;
 static SensorState odom_pose = {0};
-static float g_pose_diff_log_accum = 0.0f;
 static SensorState prev_odom_pose = {0};
 static int rollout_has_collided[MPPI_SAMPLES];
 
@@ -126,6 +117,16 @@ static ICPContext icp_res = {
     /* ICPResultState result = */ {0}
 };
 
+// Pose of the EKF at the time the reference scan was handed to ICP.
+// ICP gives delta from reference->current; we anchor that delta here
+// to reconstruct an absolute world-frame measurement for the EKF correction.
+static float ref_ekf_x       = 0.0f;
+static float ref_ekf_z       = 0.0f;
+static float ref_ekf_heading = 0.0f;
+// World-space sensor origin when the reference scan was taken, used to
+// centre both clouds in sensor-local frame before ICP.
+static float ref_sensor_x = 0.0f;
+static float ref_sensor_z = 0.0f;
 
 static void *icp_worker_main(void *arg) {
     ICPContext *context = (ICPContext *)arg;
@@ -148,11 +149,11 @@ static void *icp_worker_main(void *arg) {
         context->result.is_job_complete = 1;
         pthread_mutex_unlock(&context->mutex);
     }
-    return NULL; // nothing to return
+    return NULL;
 }
 
 
-// nominal steer and throttle, warm started with previous frame'sim_state optimal
+// nominal steer and throttle, warm started with previous frame's optimal
 static float nom_steer[MPPI_HORIZON];
 static float nom_throttle[MPPI_HORIZON];
 
@@ -163,15 +164,13 @@ static float trajectory_cost[MPPI_SAMPLES];
 
 
 // rollout cost weights
-#define W_CROSS_TRACK 3.5f // penalise distancing from path centre
-#define W_HEADING 1.2f // penalise heading vs path tangent
-#define W_STEER_RATE 3.0f // penalise changes in steering
-#define W_SPEED 0.3f // penalise changes from desired speed
-#define W_THROTTLE_EFFORT 0.15f // penalise throttle usage
-#define W_TERMINAL_CROSS_TRACK 2.5f // terminal cost to heavily penalise ending far from path centre
-#define W_TERMINAL_HEADING 1.0f // terminal cost to penalise ending with heading error
-#define W_COLLISION 50.0f // penalty when movement is blocked by collision
-
+#define W_CROSS_TRACK 2.0f
+#define W_HEADING 12.0f
+#define W_STEER_RATE 0.1f
+#define W_SPEED 6.0f
+#define W_TERMINAL_CROSS_TRACK 1.5f
+#define W_TERMINAL_HEADING 2.0f
+#define W_COLLISION 50.0f
 
 // waypoints
 #define WAYPOINT_REACH_DIST 1.0f
@@ -334,7 +333,7 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
 {
     SimState sim_state = init_state;
     float cost = 0.0f;
-    float prev_steer = nom_steer_seq[0];
+    float prev_steer = get_steer();
     int collided = 0;
 
     for (int j = 0; j < horizon; j++) {
@@ -345,7 +344,7 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                                       &sim_state.wp_idx,
                                       sim_state.x,
                                       sim_state.z,
-                                      path->count - 1);
+                                      path->count);
 
         float path_heading;
         int nearest_segment;
@@ -358,17 +357,31 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
         float heading_error = wrap_angle(sim_state.dir_angle - path_heading);
 
         float progress_reward = (float)(nearest_segment - sim_state.wp_idx);
-        // allow skipping within sim state not just relative to path
         if (nearest_segment > sim_state.wp_idx) {
             sim_state.wp_idx = nearest_segment;
+        }
+
+        // continuous along-track reward within the current segment so MPPI
+        // has a signal to drive forward even when no segment skip occurs
+        float along_track = 0.0f;
+        int seg_end = nearest_segment + 1;
+        if (seg_end < path->count) {
+            float seg_dx = path->waypoints[seg_end].x - path->waypoints[nearest_segment].x;
+            float seg_dz = path->waypoints[seg_end].z - path->waypoints[nearest_segment].z;
+            float seg_len = sqrtf(seg_dx * seg_dx + seg_dz * seg_dz);
+            if (seg_len > 1e-4f) {
+                along_track = ((sim_state.x - path->waypoints[nearest_segment].x) * seg_dx
+                             + (sim_state.z - path->waypoints[nearest_segment].z) * seg_dz)
+                             / seg_len;
+            }
         }
 
         cost += W_CROSS_TRACK * (cross_track_error * cross_track_error)
               + W_HEADING * (heading_error * heading_error)
               + W_STEER_RATE * ((steer_cmd - prev_steer) * (steer_cmd - prev_steer))
-              + W_THROTTLE_EFFORT * (throttle_cmd * throttle_cmd)
               + W_SPEED * ((sim_state.speed - SPEED_REF) * (sim_state.speed - SPEED_REF))
-              - progress_reward;
+              - progress_reward
+              - 2.0f * along_track;
 
         prev_steer = steer_cmd;
 
@@ -386,8 +399,8 @@ float mppi_compute_rollout_cost(const TriangleArray *scene,
                            ROVER_COLLISION_RADIUS);
 
         if (fabsf(sim_state.x - prev_x) + fabsf(sim_state.z - prev_z) < 1e-6f &&
-            fabsf(throttle_cmd) > 0.05f) { // control with no movement
-            cost += W_COLLISION; // heuristic weight penalisation instead of heavy computation
+            fabsf(throttle_cmd) > 0.05f) {
+            cost += W_COLLISION;
             collided = 1;
         }
     }
@@ -491,7 +504,6 @@ static void mppi_update(void){
         return;
     }
 
-    // fallback do manually + for testing
     if (rollout_status == 0) {
         for (int i = 0; i < MPPI_SAMPLES; i++) {
             trajectory_cost[i] = rollout_cost(i);
@@ -511,7 +523,6 @@ static void mppi_update(void){
         weighted_sum += weights[i];
     }
 
-    // weighted
     for (int j = 0; j < MPPI_HORIZON; j++) {
         float delta_steer = 0.0f;
         float delta_throttle = 0.0f;
@@ -523,6 +534,7 @@ static void mppi_update(void){
         nom_steer[j] = clamp_steer(nom_steer[j] + delta_steer);
         nom_throttle[j] = clamp_throttle(nom_throttle[j] + delta_throttle);
     }
+
     uint64_t step_id = next_mppi_step_id();
     uint64_t ts = time_now_microsecs();
     float cost_mean = 0.0f;
@@ -536,11 +548,7 @@ static void mppi_update(void){
     }
     cost_variance /= MPPI_SAMPLES;
 
-    int collision_count = 0;
-    for (int i = 0; i < MPPI_SAMPLES; i++) collision_count += rollout_has_collided[i];
-    float collision_rate = (float)collision_count / MPPI_SAMPLES;
-
-    float ess = 0.0f; // effective sample size = 1 / sum(w^2)
+    float ess = 0.0f;
     float sum_w2 = 0.0f;
     for (int i = 0; i < MPPI_SAMPLES; i++) {
         float w = weights[i] / weighted_sum;
@@ -557,11 +565,8 @@ static void mppi_update(void){
                                               &path_heading,
                                               &nearest_seg);
 
-    log_mppi_step(step_id, ts, cost_mean, cost_variance, min_cost,
-                  ess, cte);
-
+    log_mppi_step(step_id, ts, cost_mean, cost_variance, min_cost, ess, cte);
 }
-
 
 
 static void advance_mppi(void) { 
@@ -573,8 +578,6 @@ static void advance_mppi(void) {
     nom_throttle[MPPI_HORIZON - 1] = nom_throttle[MPPI_HORIZON - 2];
 }
 
-
-// END MPPI CONTROLLER 
 
 void init_rover_controller(void) {
 
@@ -591,7 +594,6 @@ void init_rover_controller(void) {
     replan_request_sent = 0;
 
     memset(nom_steer, 0, sizeof(nom_steer));
-    // seed throttle so the rover starts moving without waiting for convergence
     for (int i = 0; i < MPPI_HORIZON; i++){
         nom_throttle[i] = 0.35f;
     }
@@ -604,24 +606,21 @@ void init_rover_controller(void) {
     pthread_create(&icp_thread, NULL, icp_worker_main, &icp_res);
     pthread_detach(icp_thread);
 }
+
 void update_odometry(float dt) {
-    g_pose_diff_log_accum += dt;
-    if (g_pose_diff_log_accum >= POSE_DIFF_LOG_INTERVAL) {
-        g_pose_diff_log_accum = 0.0f;
-    }
     float throttle = get_throttle();
     float steer = get_steer();
 
     float throttle_cmd = throttle;
-    if (throttle != 0.0f) {
-        throttle_cmd += gaussian_noise() * SPEED_NOISE;
-    }
-
     float steer_cmd = steer;
-    if (steer != 0.0f) {
-        steer_cmd += gaussian_noise() * ANGULAR_NOISE;
-    }
-    // odom_pose not touched by EKF, purely dead reckoning from last frame's pose + control input, used for odometry delta in EKF prediction step
+    #ifndef DISABLE_ODOM_NOISE
+        if (throttle != 0.0f) {
+            throttle_cmd += gaussian_noise() * SPEED_NOISE;
+        }
+        if (steer != 0.0f) {
+            steer_cmd += gaussian_noise() * ANGULAR_NOISE;
+        }
+    #endif
     step_rover_physics(&odom_pose.origin.x,
                        &odom_pose.origin.z,
                        &odom_pose.dir_angle,
@@ -632,11 +631,10 @@ void update_odometry(float dt) {
                        dt,
                        NULL,
                        ROVER_COLLISION_RADIUS);
-    // ekf pred, advance uncertainty
     ekf_fusion_predict_from_odometry(&ekf_pose,
                                      odom_pose.origin.x - prev_odom_pose.origin.x,
                                      odom_pose.origin.z - prev_odom_pose.origin.z,
-                                     odom_pose.dir_angle - prev_odom_pose.dir_angle);
+                                     wrap_angle(odom_pose.dir_angle - prev_odom_pose.dir_angle));
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 
     prev_odom_pose = odom_pose;
@@ -648,32 +646,45 @@ void update_odometry(float dt) {
 void update_lidar_fusion(const PointCloud *current_scan,
                          const PointCloud *reference_scan) {
 
-    PointCloud current_copy = {0};
-    PointCloud reference_copy = {0};
-    if (current_scan->size <= 0 || reference_scan->size <= 0) {
-        return;
-    }
+    Vector3 sensor_pos;
+    get_sensor_pos(&sensor_pos);
 
     pthread_mutex_lock(&icp_res.mutex);
     int job_busy = icp_res.job.is_working;
     pthread_mutex_unlock(&icp_res.mutex);
 
     if (!job_busy) {
-
-        if (point_cloud_copy(&current_copy, current_scan) &&
-            point_cloud_copy(&reference_copy, reference_scan)) 
+        PointCloud current_local = {0};
+        PointCloud reference_local = {0};
+        if (point_cloud_copy(&current_local, current_scan) &&
+            point_cloud_copy(&reference_local, reference_scan))
         {
+            // shift to local frame
+            for (int i = 0; i < current_local.size; i++) {
+                current_local.data[i].position.x -= ref_sensor_x;
+                current_local.data[i].position.z -= ref_sensor_z;
+            }
+            for (int i = 0; i < reference_local.size; i++) {
+                reference_local.data[i].position.x -= ref_sensor_x;
+                reference_local.data[i].position.z -= ref_sensor_z;
+            }
+
+            ref_ekf_x = ekf_pose.state.origin.x;
+            ref_ekf_z = ekf_pose.state.origin.z;
+            ref_ekf_heading = ekf_pose.state.dir_angle;
+            ref_sensor_x = sensor_pos.x;
+            ref_sensor_z = sensor_pos.z;
 
             pthread_mutex_lock(&icp_res.mutex);
-            icp_res.job.current = current_copy;
-            icp_res.job.reference = reference_copy;
+            icp_res.job.current   = current_local;
+            icp_res.job.reference = reference_local;
             icp_res.job.is_working = 1;
             pthread_cond_signal(&icp_res.cond);
             pthread_mutex_unlock(&icp_res.mutex);
-        }
-        else{
-            point_cloud_free(&current_copy);
-            point_cloud_free(&reference_copy);
+        } 
+        else {
+            point_cloud_free(&current_local);
+            point_cloud_free(&reference_local);
         }
     }
 
@@ -687,11 +698,13 @@ void update_lidar_fusion(const PointCloud *current_scan,
     }
     pthread_mutex_unlock(&icp_res.mutex);
 
-    if (is_job_complete) {
-        if (icp.converged) {
-            ekf_fusion_correct_from_icp(&ekf_pose, &icp);
-        }
+    if (is_job_complete && icp.converged) {
+        ekf_fusion_correct_from_icp(&ekf_pose, &icp,
+                                    ref_ekf_x,
+                                    ref_ekf_z,
+                                    ref_ekf_heading);
     }
+
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 }
 
@@ -728,7 +741,6 @@ void update_path_follower(float dt) {
         return;
     }
 
-    // skip waypoints based off projection
     float _;
     int nearest_segment;
     project_rover_to_path_segment(&active_path,
@@ -738,15 +750,20 @@ void update_path_follower(float dt) {
         active_path.current = nearest_segment;
     }
 
-
     int prev_waypoint_idx = active_path.current;
+    int wp_lookahead_limit = active_path.current + LOOK_AHEAD + 1;
+    if (wp_lookahead_limit > active_path.count) wp_lookahead_limit = active_path.count;
     advance_waypoint_to_farthest_reached(&active_path,
                                          &active_path.current,
                                          rover_pose.origin.x,
                                          rover_pose.origin.z,
-                                         active_path.count);
+                                         wp_lookahead_limit);
+    // new waypoint, reset nominal sequence to default to give MPPI a better starting point for optimization
     if (active_path.current > prev_waypoint_idx) {
-        /* waypoint reached - console print removed to avoid noisy stdout */
+        memset(nom_steer, 0, sizeof(nom_steer));
+        for (int i = 0; i < MPPI_HORIZON; i++) {
+            nom_throttle[i] = 0.35f;
+        }
     }
 
     if (active_path.current >= active_path.count) {
@@ -757,31 +774,18 @@ void update_path_follower(float dt) {
 
     awaiting_replan_scan = 0;
 
-    // run MPPI optimisation to get nominal control sequence
     mppi_update();
 
     float steer = nom_steer[0];
     float throttle = nom_throttle[0];
 
-    const Waypoint *last = &active_path.waypoints[active_path.count - 1];
-    float final_dx = last->x - rover_pose.origin.x;
-    float final_dz = last->z - rover_pose.origin.z;
-    float final_dist_sq = final_dx * final_dx + final_dz * final_dz;
-
-    // slow down for final waypoint (disabled - deceleration not needed)
-    /*
-    if (active_path.current == active_path.count - 1 && final_dist_sq < WAYPOINT_REACH_THRESHOLD){
-        throttle *= sqrtf(final_dist_sq) / 1.5f;
-    }
-    */
-
     set_steer(steer);
     set_throttle(throttle);
-
-    advance_mppi();
+    // only advance sequence if we are non-stationary
+    if (nom_throttle[0] > 0.1f) {
+        advance_mppi();
+    }
 }
-
-// END OF MPPI CONTROLLER
 
 void set_waypoints(Waypoint *points, int count)
 {
@@ -794,6 +798,7 @@ void set_waypoints(Waypoint *points, int count)
             .x = rover_pose.origin.x,
             .z = rover_pose.origin.z
         };
+        
 
         for (int i = 0; i < n && write_idx < MAX_WAYPOINTS; i++) {
             active_path.waypoints[write_idx++] = points[i];
@@ -809,7 +814,6 @@ void set_waypoints(Waypoint *points, int count)
     replan_request_sent = 0;
     awaiting_replan_scan = 0;
 
-    // stale controls and reseed warm start
     memset(nom_steer, 0, sizeof(nom_steer));
     for (int i = 0; i < MPPI_HORIZON; i++){
         nom_throttle[i] = 0.35f;
@@ -822,7 +826,6 @@ void set_waypoints(Waypoint *points, int count)
 void render_predicted_path(void)
 {
     if (active_path.current >= active_path.count) return;
-
     // replay nominal sequence
     SimState sim_state = {
         .x = rover_pose.origin.x,
@@ -837,7 +840,7 @@ void render_predicted_path(void)
     glColor4f(0.0f, 1.0f, 1.0f, 1.0f);
     glVertex3f(sim_state.x, 0.25f, sim_state.z);
 
-    for (int i = 0; i < PREDICTION_STEPS; i++) {
+    for (int i = 0; i < MPPI_HORIZON; i++) {
         if (sim_state.wp_idx >= active_path.count) break;
         advance_waypoint_by_proximity(&active_path,
                                       &sim_state.wp_idx,
@@ -845,10 +848,9 @@ void render_predicted_path(void)
                                       sim_state.z,
                                       active_path.count);
 
-        rollout_simulation(&sim_state, nom_throttle[i], nom_steer[i], PREDICTION_DT);
+        rollout_simulation(&sim_state, nom_throttle[i], nom_steer[i], MPPI_DT);
         
-        // fade out
-        float t = (float)i / PREDICTION_STEPS;
+        float t = (float)i / MPPI_HORIZON;
         glColor4f(0.0f, 1.0f - 0.5f*t, 1.0f, 1.0f - 0.3f*t);
         glVertex3f(sim_state.x, 0.25f, sim_state.z);
     }

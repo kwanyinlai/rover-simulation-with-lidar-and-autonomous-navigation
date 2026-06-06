@@ -171,13 +171,56 @@ void build_scene(TriangleArray *scene) {
         div_walls
     );
 
+    // Front wall
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-15.f, 0.f,  12.f},
+        (Vector3){ 15.f, 0.f,  12.f},
+        (Vector3){ 15.f, 6.f,  12.f},
+        (Vector3){-15.f, 6.f,  12.f},
+        div_walls
+    );
+
     // Obstacles
-    // mesh_add_box(scene, 3.0f, 0.0f, -5.f, 1.2f, 1.0f, 1.2f);
-    // mesh_add_box(scene, -4.0f, 0, 2.0f, 0.8f, 1.5f, 0.8f);
-    // mesh_add_box(scene, 6.0f, 0.0f, 3.0f, 1.5f, 0.7f, 1.5f);
-    // mesh_add_box(scene, -2.0f, 0.0f, -6.0f, 0.6f, 2.0f, 0.6f);
-    // mesh_add_box(scene, 0.5f, 0.0f, 5.0f, 2.0f, 0.5f, 0.8f);
-    // mesh_add_box(scene, -7.0f,0, -3.0f, 1.0f, 1.2f, 1.0f);
+    mesh_add_box(scene, 3.0f, 0.0f, -5.f, 1.2f, 1.0f, 1.2f);
+    mesh_add_box(scene, -4.0f, 0, 2.0f, 0.8f, 1.5f, 0.8f);
+    mesh_add_box(scene, 6.0f, 0.0f, 3.0f, 1.5f, 0.7f, 1.5f);
+    mesh_add_box(scene, -2.0f, 0.0f, -6.0f, 0.6f, 2.0f, 0.6f);
+    mesh_add_box(scene, 0.5f, 0.0f, 5.0f, 2.0f, 0.5f, 0.8f);
+    mesh_add_box(scene, -7.0f,0, -3.0f, 1.0f, 1.2f, 1.0f);
 
     printf("%zu triangles\n", scene->size);
+}
+// Empty scene for MPPI sweep. Walls and floor only, no obstacles.
+void build_scene_empty(TriangleArray *scene) {
+    int div_walls = 8;
+
+    build_floor(scene);
+
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-15.f, 0.f, -12.f},
+        (Vector3){ 15.f, 0.f, -12.f},
+        (Vector3){ 15.f, 6.f, -12.f},
+        (Vector3){-15.f, 6.f, -12.f},
+        div_walls);
+
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-15.f, 0.f, 12.f},
+        (Vector3){-15.f, 0.f, -12.f},
+        (Vector3){-15.f, 6.f, -12.f},
+        (Vector3){-15.f, 6.f, 12.f},
+        div_walls);
+
+    mesh_add_quad_tesselated(scene,
+        (Vector3){15.f, 0.f, -12.f},
+        (Vector3){15.f, 0.f,  12.f},
+        (Vector3){15.f, 6.f,  12.f},
+        (Vector3){15.f, 6.f, -12.f},
+        div_walls);
+
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-15.f, 0.f,  12.f},
+        (Vector3){ 15.f, 0.f,  12.f},
+        (Vector3){ 15.f, 6.f,  12.f},
+        (Vector3){-15.f, 6.f,  12.f},
+        div_walls);
 }

@@ -1,4 +1,3 @@
-
 /**
  * @file scene/scene
  * @brief Scene geometry definitions and utilities.
@@ -73,5 +72,11 @@ void mesh_add_box(TriangleArray *scene, float centre_x, float centre_y, float ce
  * @param scene Output scene geometry.
  */
 void build_scene(TriangleArray *scene);
+
+/**
+ * @brief Build a walls-only scene for MPPI sweep (no obstacles).
+ * @param scene Output scene geometry.
+ */
+void build_scene_empty(TriangleArray *scene);
 
 #endif // SCENE_H
