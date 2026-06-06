@@ -1,4 +1,5 @@
 CFLAGS = -Wall -Wextra -O3 -MMD -MP -Isrc
+EXTRAFLAGS = -g
 # -03 for heavy optimisation since our program is pretty intensive
 
 BUILD_DIR = build
@@ -17,6 +18,8 @@ else
 	CFLAGS += -I/usr/include
 	LIBS = -lGL -lGLU -lglut -lm
 endif
+
+CFLAGS += $(EXTRAFLAGS)
 
 TARGET = $(BUILD_DIR)/lidar_sim
 
