@@ -646,6 +646,9 @@ void update_odometry(float dt) {
 void update_lidar_fusion(const PointCloud *current_scan,
                          const PointCloud *reference_scan) {
 
+    if (!current_scan || current_scan->size <= 0) return;
+    if (!reference_scan || reference_scan->size <= 0) return;
+
     Vector3 sensor_pos;
     get_sensor_pos(&sensor_pos);
 
