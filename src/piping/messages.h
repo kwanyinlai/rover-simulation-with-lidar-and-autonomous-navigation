@@ -12,7 +12,7 @@
 
 // MPPI hyperparameters
 #ifndef MPPI_SAMPLES
-#define MPPI_SAMPLES 256
+#define MPPI_SAMPLES 32
 #endif
 #ifndef MPPI_HORIZON
 #define MPPI_HORIZON 80

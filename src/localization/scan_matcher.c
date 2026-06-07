@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-#define CONVERGENCE_THRESHOLD (1e-2f)
+#define CONVERGENCE_THRESHOLD (1e-4f)
 #define MAX_MATCH_DIST 1.0f
 
 typedef struct {
