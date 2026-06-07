@@ -38,6 +38,17 @@ ScanState scan_state;
 static float g_duration_seconds = -1.0f; // -1 means run forever
 static float g_elapsed_seconds = 0.0f;
 
+// --analysis-mode ekf: full obstacle scene, preset waypoints, ekf active, exit on completion
+// --analysis-mode mppi: empty scene (walls only), preset waypoints, exit on completion
+typedef enum {
+    FREE_MODE,
+    EKF_MODE,
+    MPPI_MODE 
+} SweepMode;
+
+static SweepMode analysis_mode = FREE_MODE;
+static int is_run_complete = 0;
+
 static float last_time = 0.0f;
 extern int is_render_scene;
 extern int is_paused;
@@ -489,6 +500,57 @@ void create_workers(void){
     
 }
 
+// TODO: EKF waypoints need to be adjusted, too complex
+static const Waypoint EKF_WAYPOINTS[] = {
+    { 12.0f,  -8.0f },
+    { 12.0f,   0.0f },
+    {  8.0f,   8.0f },
+    {  0.0f,   9.0f },
+    { -6.0f,   5.0f },
+    {-12.0f,   8.0f },
+    {-12.0f,   0.0f },
+    { -8.0f,  -8.0f },
+    { -2.0f,  -9.0f },
+    {  0.0f,  -4.0f },
+};
+static const int EKF_WAYPOINT_COUNT =
+    (int)(sizeof(EKF_WAYPOINTS) / sizeof(EKF_WAYPOINTS[0]));
+
+// MPPI circuit: basic curved path
+static const Waypoint MPPI_WAYPOINTS[] = {
+    {  3.0f,  -2.0f },
+    {  7.0f,  -5.0f },
+    { 10.0f,   0.0f },
+    {  7.0f,   5.0f },
+    {  0.0f,   9.0f }
+};
+static const int MPPI_WAYPOINT_COUNT =
+    (int)(sizeof(MPPI_WAYPOINTS) / sizeof(MPPI_WAYPOINTS[0]));
+
+static void load_preset_waypoints(void) {
+    if (analysis_mode == EKF_MODE) {
+        set_waypoints(EKF_WAYPOINTS, EKF_WAYPOINT_COUNT);
+    }
+    else if (analysis_mode == MPPI_MODE) {
+        set_waypoints(MPPI_WAYPOINTS, MPPI_WAYPOINT_COUNT);
+    }
+}
+
+static float run_start_time = -1.0f;
+static void check_run_complete(float current_time) {
+    if (is_run_complete) return;
+    if (run_start_time < 0.0f) run_start_time = current_time;
+    if (active_path.current >= active_path.count && active_path.count > 0) {
+        is_run_complete = 1;
+        float elapsed = current_time - run_start_time;
+        fprintf(stderr, "[run] complete in %.2fs\n", elapsed);
+        metrics_close();
+        if (scan_coord_pid > 0) kill(scan_coord_pid, SIGTERM);
+        if (rollout_coord_pid > 0) kill(rollout_coord_pid, SIGTERM);
+        exit(0);
+    }
+}
+
 void display() {
     float current_time = glutGet(GLUT_ELAPSED_TIME) / 1000.0f; 
     float delta_time = current_time - last_time;
@@ -516,10 +578,17 @@ void display() {
         if (rover_mode == MODE_AUTO) {
             update_path_follower(delta_time);
         }
+        // while testing hyperparameters, exit once the preset path is fully consumed.
+        if (analysis_mode != FREE_MODE) {
+            check_run_complete(current_time);
+        }
 
         update_odometry(delta_time);
         rover_control(delta_time);
-        consume_frontier_waypoints();
+        // ignore self-generated frontier waypoints in analysis mode
+        if (analysis_mode == FREE_MODE) {
+            consume_frontier_waypoints();
+        }
     }
 
     // CHECK AVAILABLE SCAN AND CORRECT
@@ -578,6 +647,15 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
             g_duration_seconds = (float)atof(argv[i + 1]);
         }
+        else if (strcmp(argv[i], "--sweep-mode") == 0 && i + 1 < argc) {
+            i++;
+            if (strcmp(argv[i], "ekf") == 0) {
+                analysis_mode = EKF_MODE;
+            }
+            else if (strcmp(argv[i], "mppi") == 0) {
+                analysis_mode = MPPI_MODE;
+            }
+        }
     }
 
     metrics_init();
@@ -589,14 +667,29 @@ int main(int argc, char** argv) {
     init_scan_state(&scan_state);
     init_rover_controller();
 
-
     init_point_cloud(&cloud);
     triangle_array_init(&scene);
-    build_scene(&scene);
+
+    // empty scene so CTE isn't disrupted by obstacles; obstacles uneeded
+    // for localisation because noise turned off
+    if (analysis_mode == MPPI_MODE) {
+        build_scene_empty(&scene);
+    }
+    else {
+        build_scene(&scene);
+    }
+
     init_occupancy_map(&occupancy_grid_3d, 300, 60, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
     init_occupancy_map(&occupancy_grid_2d, 300, 1, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
-    create_workers();
     // x from -15 to 15, y from 0 to 6, z from -12 to 12, with 0.1m resolution, gives us a 300x60x240 grid
+
+    create_workers();
+
+    if (analysis_mode != FREE_MODE) {
+        load_preset_waypoints();
+        rover_mode = MODE_AUTO;
+    }
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(768, 768);

@@ -188,6 +188,8 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
                   const PointCloud *reference_scan, // target: reference scan
                   int max_iterations) {
 
+                    
+
     uint64_t match_id = next_icp_match_id();
 
     ICPResult result = {0};
@@ -271,10 +273,7 @@ ICPResult run_icp(const PointCloud *current_scan,   // source: current scan
         mu_Q[0] /= matched_count;
         mu_Q[1] /= matched_count;
 
-        // Cross-covariance matrix H between centered point sets P and Q
-        // Build H = Sigma_i(p_i q_i^T)
-        // Recover rotation (arctan equivalent to SVD in 2D)
-        //   θ = atan2(H01 - H10, H00 + H11)
+
         float H[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
 
         for (int i = 0; i < n; i++) {
