@@ -62,7 +62,7 @@ W_SPEED_LIST="2.0 6.0 10.0"
 # ANGLE_NOISE_LIST="0.75 1.5 3.0"
 
 
-deg2rad_cfloat() {
+deg2rad_cfloat() { # convert degrees to a C float literal
     echo "$1" | awk '{ printf "%.6ff\n", $1 * 3.14159265358979 / 180 }'
 }
 
@@ -95,8 +95,7 @@ mkdir -p "$LOG_BASE"
 RUN_ID=0
 CONFIG_ID=0
 
-# ── Core run function ─────────────────────────────────────────────────
-
+# Core
 run_config() {
     local speed_noise="$1"
     local angular_noise_deg="$2"
@@ -112,7 +111,7 @@ run_config() {
     CONFIG_ID=$((CONFIG_ID + 1))
     local config_id="$CONFIG_ID"
     local angular_noise_rad; angular_noise_rad=$(deg2rad_cfloat "$angular_noise_deg")
-    local angle_noise_rad;   angle_noise_rad=$(deg2rad_cfloat "$angle_noise_deg")
+    local angle_noise_rad; angle_noise_rad=$(deg2rad_cfloat "$angle_noise_deg")
 
     local noise_flag=""
     if [ "$ODOM_NOISE" = "0" ]; then
