@@ -15,10 +15,6 @@ typedef struct {
     float R_t[EKF_MEAS_DIM][EKF_MEAS_DIM]; // covariance matrix of process noise, how much uncertainty odometry adds per step
 } KalmanFilter;
 
-/* 
-void set_scan_match_pipe_fds(int cmd_fd, int res_fd);
-*/
-
 /**
  * Initialize the EKF with a starting pose and default noise parameters.
  *
@@ -38,25 +34,33 @@ void ekf_fusion_init(KalmanFilter *ekf, const SensorState *initial_state);
  */
 void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, float dx, float dz, float dtheta);
 
-// legacy EKF correction performed on main thread
-// void ekf_fusion_correct_step(KalmanFilter *ekf,
-//                              const PointCloud *current_scan,
-//                              const PointCloud *reference_scan);
-
+/**
+ * Correct step using an ICP result anchored to a keyframe pose.
+ *
+ * ICP gives a displacement (dx, dz, dtheta) from the keyframe scan origin.
+ * This function reconstructs the absolute world-frame measurement
+ *   z = keyframe_pose + icp_delta
+ * and uses it to pull the EKF estimate toward the true pose.
+ *
+ * Must only be called when icp->converged is true and icp->error is
+ * below the acceptance threshold; ekf_fusion_correct_from_icp enforces
+ * this internally but callers should gate on it too for clarity.
+ *
+ * @param ekf           Pointer to KalmanFilter to update.
+ * @param icp           ICP result relative to the keyframe.
+ * @param kf_x          World-frame x position when the keyframe was taken.
+ * @param kf_z          World-frame z position when the keyframe was taken.
+ * @param kf_heading    World-frame heading when the keyframe was taken.
+ */
+void ekf_fusion_correct_from_icp(KalmanFilter *ekf,
+                                  const ICPResult *icp,
+                                  float kf_x,
+                                  float kf_z,
+                                  float kf_heading);
 
 /**
- * Correct step. Pulls the pose estimate toward an ICP scan-match result and
- * shrinks uncertainty. How much the estimate moves depends on the Kalman Gain,
- * which balances current uncertainty (Sigma) against ICP noise (Q_t).
- *
- * Should be called ONLY when ICP has converged with acceptable error to prevent
- * bad scan matches from corrupting EKF state.
- *
- * @param ekf Pointer to Kalman Filter to update.
- * @param icp Results from ICP scan matching, used as measurement to correct EKF state.
+ * Return a pointer to the current EKF state estimate
  */
-void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp);
-
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf);
 
 #endif // EKF_FUSION_H

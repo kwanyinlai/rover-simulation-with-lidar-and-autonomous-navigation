@@ -11,16 +11,16 @@
 #include <string.h>
 
 #ifndef EKF_DEFAULT_SPEED_NOISE
-#define EKF_DEFAULT_SPEED_NOISE 0.002f
+#define EKF_DEFAULT_SPEED_NOISE 0.15f
 #endif
 #ifndef EKF_DEFAULT_ANGULAR_NOISE
-#define EKF_DEFAULT_ANGULAR_NOISE (0.050f * MATH_DEG_TO_RAD)
+#define EKF_DEFAULT_ANGULAR_NOISE (4.0f * MATH_DEG_TO_RAD)
 #endif
 #ifndef EKF_DEFAULT_LIDAR_NOISE
-#define EKF_DEFAULT_LIDAR_NOISE 0.1f
+#define EKF_DEFAULT_LIDAR_NOISE 0.15f
 #endif
 #ifndef EKF_DEFAULT_ANGLE_NOISE
-#define EKF_DEFAULT_ANGLE_NOISE (3.0f * MATH_DEG_TO_RAD)
+#define EKF_DEFAULT_ANGLE_NOISE (4.0f * MATH_DEG_TO_RAD)
 #endif
 #define ICP_CORRECTION_MAX_ITERS 100
 
@@ -195,6 +195,7 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, float dx, float dz, flo
 }
 
 
+/*
 // Table 3.3 (Thrun et al.), lines 4-6
 void ekf_fusion_correct_step(KalmanFilter *ekf,
                              const PointCloud *current_scan,
@@ -205,7 +206,7 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
     if (current_scan->size <= 0 || reference_scan->size <= 0) {
         return;
     }
-                                       
+
     // µ_t = rover's guess of its own position
     // g(u_t, µ_t−1): state transition function, applies odometry control input to previous state estimate to get predicted new state
     // Sigma = rover's uncertainty about its own position
@@ -220,7 +221,7 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
     // line 4: K_t = Σ̄_t * H_t^T * (H_t * Σ̄_t * H_t^T + Q_t)^{-1}
     //             = Σ̄_t * (Σ̄_t + Q_t)^{-1}   since H_t = I
     // K_t is the Kalman Gain, how much to trust measurement vs prediction
-
+                                       
     float Sigma_bar_plus_Q_t[EKF_STATE_DIM][EKF_STATE_DIM];
     float Sigma_bar_plus_Q_t_inv[EKF_STATE_DIM][EKF_STATE_DIM];
     float K_t[EKF_STATE_DIM][EKF_STATE_DIM];
@@ -257,7 +258,7 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
     );
 
     // line 6: Σ_t = (I - K_t * H_t) * Σ̄_t
-    //             = (I - K_t) * Σ̄_t   since H_t = I
+    //             = (I - K_t) * Σ̄_t   since H_t = I    
     float I_minus_K_t[EKF_STATE_DIM][EKF_STATE_DIM];
     for (int r = 0; r < EKF_STATE_DIM; r++) {
         for (int c = 0; c < EKF_STATE_DIM; c++) {
@@ -269,8 +270,14 @@ void ekf_fusion_correct_step(KalmanFilter *ekf,
     matrix_mult(I_minus_K_t, ekf->Sigma, Sigma_t);
     memcpy(ekf->Sigma, Sigma_t, sizeof(ekf->Sigma));
 }
+*/
 
-void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
+//TODO: understand
+void ekf_fusion_correct_from_icp(KalmanFilter *ekf,
+                                 const ICPResult *icp,
+                                 float kf_x,
+                                 float kf_z,
+                                 float kf_heading) {
     if (!ekf || !icp) {
         return;
     }
@@ -281,35 +288,47 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
     uint64_t update_id = next_ekf_update_id();
     uint64_t ts = time_now_microsecs();
 
-    float Sigma_bar_plus_Q_t[EKF_STATE_DIM][EKF_STATE_DIM];
-    float Sigma_bar_plus_Q_t_inv[EKF_STATE_DIM][EKF_STATE_DIM];
+    // line 4: K_t = Σ̄_t * H_t^T * (H_t * Σ̄_t * H_t^T + Q_t)^{-1}
+    //             = Σ̄_t * (Σ̄_t + Q_t)^{-1}   since H_t = I
+    // K_t is the Kalman Gain, how much to trust measurement vs prediction
+    float S[EKF_STATE_DIM][EKF_STATE_DIM];
+    float S_inv[EKF_STATE_DIM][EKF_STATE_DIM];
     float K_t[EKF_STATE_DIM][EKF_STATE_DIM];
-    matrix_add(ekf->Sigma, ekf->Q_t, Sigma_bar_plus_Q_t);
-    matrix_inverse(Sigma_bar_plus_Q_t, Sigma_bar_plus_Q_t_inv);
-    matrix_mult(ekf->Sigma, Sigma_bar_plus_Q_t_inv, K_t);
+    matrix_add(ekf->Sigma, ekf->Q_t, S);
+    matrix_inverse(S, S_inv);
+    matrix_mult(ekf->Sigma, S_inv, K_t);
 
-    float z_t[EKF_STATE_DIM] = {
-        ekf->state.origin.x + icp->dx,
-        ekf->state.origin.z + icp->dz,
-        wrap_angle(ekf->state.dir_angle + icp->delta_theta)
+    // line 5a: z_t = measurement from scan matching
+    // kf_x/kf_z/kf_heading is the anchor: where the EKF believed the rover was
+    // when the reference scan was collected. icp->dx/dz are the measured delta
+    // from that pose, so we reconstruct the absolute measurement from the anchor.
+    float z_x = kf_x + icp->dx;
+    float z_z = kf_z + icp->dz;
+    float z_h = wrap_angle(kf_heading + icp->delta_theta);
+
+    // line 5: µt = µ¯t + Kt(zt − h(µ¯t))
+    // since H_t = I then h(µ̄_t) = µ̄_t
+
+    // z_minus_h(µ¯_t) = z_t - µ¯_t
+    float innov[EKF_STATE_DIM] = {
+        z_x - ekf->state.origin.x,
+        z_z - ekf->state.origin.z,
+        wrap_angle(z_h - ekf->state.dir_angle)
     };
 
-    float z_minus_h_mu_bar[EKF_STATE_DIM] = {
-        z_t[0] - ekf->state.origin.x,
-        z_t[1] - ekf->state.origin.z,
-        wrap_angle(z_t[2] - ekf->state.dir_angle)
-    };
-
-    ekf->state.origin.x += K_t[0][0]*z_minus_h_mu_bar[0] + K_t[0][1]*z_minus_h_mu_bar[1] + K_t[0][2]*z_minus_h_mu_bar[2];
-    ekf->state.origin.z += K_t[1][0]*z_minus_h_mu_bar[0] + K_t[1][1]*z_minus_h_mu_bar[1] + K_t[1][2]*z_minus_h_mu_bar[2];
+    ekf->state.origin.x += K_t[0][0]*innov[0] + K_t[0][1]*innov[1] + K_t[0][2]*innov[2];
+    ekf->state.origin.z += K_t[1][0]*innov[0] + K_t[1][1]*innov[1] + K_t[1][2]*innov[2];
     ekf->state.dir_angle = wrap_angle(
-        ekf->state.dir_angle + K_t[2][0]*z_minus_h_mu_bar[0] + K_t[2][1]*z_minus_h_mu_bar[1] + K_t[2][2]*z_minus_h_mu_bar[2]
+        ekf->state.dir_angle + K_t[2][0]*innov[0] + K_t[2][1]*innov[1] + K_t[2][2]*innov[2]
     );
 
+    // line 6: Σ_t = (I - K_t * H_t) * Σ̄_t
+    //             = (I - K_t) * Σ̄_t   since H_t = I
     float I_minus_K_t[EKF_STATE_DIM][EKF_STATE_DIM];
     for (int r = 0; r < EKF_STATE_DIM; r++) {
         for (int c = 0; c < EKF_STATE_DIM; c++) {
             I_minus_K_t[r][c] = (r == c ? 1.0f : 0.0f) - K_t[r][c];
+            // r == c means diagonals
         }
     }
     float Sigma_t[EKF_STATE_DIM][EKF_STATE_DIM];
@@ -320,57 +339,34 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf, const ICPResult *icp) {
     float P_xx = ekf->Sigma[0][0];
     float P_yy = ekf->Sigma[1][1];
     float P_hh = ekf->Sigma[2][2];
-    const SensorState *true_state = get_sensor_state();
-    float est_x = ekf->state.origin.x;
-    float est_y = ekf->state.origin.z;
-    float est_h = ekf->state.dir_angle;
-    float true_x = true_state->origin.x;
-    float true_y = true_state->origin.z;
-    float true_h = true_state->dir_angle;
     // S = innovation covariance = measurement noise with covariance Q + uncertainty with covariance Sigma_bar
     // innovation = the difference between what the sensor returned and what the filter predicted
-    float S_inv[EKF_MEAS_DIM][EKF_MEAS_DIM];
-    matrix_inverse(Sigma_bar_plus_Q_t, S_inv);
-    float innov[3] = { z_minus_h_mu_bar[0], z_minus_h_mu_bar[1], z_minus_h_mu_bar[2] };
-    float S_inv_times_innov[3] = {0};
+    float S_inv_innov[EKF_MEAS_DIM] = {0};
     for (int r = 0; r < EKF_MEAS_DIM; r++) {
         for (int c = 0; c < EKF_MEAS_DIM; c++) {
-            S_inv_times_innov[r] += S_inv[r][c] * innov[c];
+            S_inv_innov[r] += S_inv[r][c] * innov[c];
         }
     }
     // NIS = innovation^T * S^-1 * innovation
     float nis = 0.0f;
-    // dot product = innov^T * (S_inv_times_innov)
-    for (int i = 0; i < EKF_MEAS_DIM; i++) nis += innov[i] * S_inv_times_innov[i];
-    uint64_t match_id = icp->match_id;
-    log_ekf_update(update_id, ts, match_id,
-                    z_minus_h_mu_bar[0],
-                    z_minus_h_mu_bar[1],
-                    z_minus_h_mu_bar[2],
+    // dot product = innov^T * (S_inv_innov)
+    for (int i = 0; i < EKF_MEAS_DIM; i++) nis += innov[i] * S_inv_innov[i];
+    const SensorState *true_state = get_sensor_state();
+    log_ekf_update(update_id, ts, icp->match_id,
+                    innov[0],
+                    innov[1],
+                    innov[2],
                     nis,
                     P_xx,
                     P_yy,
                     P_hh,
-                    est_x,
-                    est_y,
-                    est_h,
-                    true_x,
-                    true_y,
-                    true_h);
+                    ekf->state.origin.x,
+                    ekf->state.origin.z,
+                    ekf->state.dir_angle,
+                    true_state->origin.x,
+                    true_state->origin.z,
+                    true_state->dir_angle);
 }
-
-
-
-/*
-void ekf_fusion_correct_step(KalmanFilter *ekf, const PointCloud *cloud, float scan_theta) {
-    
-    // TODO: this is tough. requires localization like SLAM and I don't have time to write out a 
-    // full SLAM implementation here
-    (void) ekf;
-    (void) cloud;
-    (void) scan_theta;
-}
-*/
 
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf) {
     return &ekf->state;
