@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # search.sh — parameter sweep runner
 #
-# Configure ANALYSIS_MODE and the parameter lists below, then run:
-#   bash search.sh
+# Configure ANALYSIS_MODE and the parameter lists below, then run
 #
 # Comment in/out lists to control what gets swept.
 # Anything without a list falls back to its FIXED_* default.
@@ -23,15 +22,15 @@ REPEATS=3
 # Analysis Mode:
 # For ekf: uses preset waypoints + full obstacle scene.
 # Set ODOM_NOISE=0 to disable odometry noise for clean EKF testing.
-ANALYSIS_MODE="mppi"
-ODOM_NOISE=0 # 1 = enabled, 0 = disabled
+ANALYSIS_MODE="script"
+ODOM_NOISE=1 # 1 = enabled, 0 = disabled
 
 # Fixed default values if not tested
-FIXED_SPEED_NOISE="0.05"
-FIXED_ANGULAR_NOISE_DEG="2.0"
+FIXED_SPEED_NOISE="0.1"
+FIXED_ANGULAR_NOISE_DEG="8.0"
 FIXED_LIDAR_NOISE="0.05"
 FIXED_ANGLE_NOISE_DEG="1.5"
-FIXED_LAMBDA="4.0"
+FIXED_LAMBDA="1.0"
 FIXED_SAMPLES="256"
 FIXED_HORIZON="80"
 FIXED_W_HEADING="8.0"
@@ -42,8 +41,8 @@ FIXED_SIGMA_STEER="1.2"
 # Comment out to hold parameter fixed with default value
 
 # MPPI Weights
-W_HEADING_LIST="4.0 8.0 12.0"
-W_SPEED_LIST="2.0 6.0 10.0"
+# W_HEADING_LIST="4.0 8.0 12.0"
+# W_SPEED_LIST="2.0 6.0 10.0"
 
 # MPPI Architecture
 # MPPI_SAMPLES_LIST="128 256"
@@ -54,12 +53,12 @@ W_SPEED_LIST="2.0 6.0 10.0"
 # MPPI_LAMBDA_LIST="1.0 2.5 4.0 7.0 10.0"
 
 # EKF Process Noise
-# SPEED_NOISE_LIST="0.02 0.05 0.10"
-# ANGULAR_NOISE_LIST="0.5 2.0 4.0"
+# SPEED_NOISE_LIST="0.05 0.10 0.20 0.40"
+# ANGULAR_NOISE_LIST="2.0 4.0 8.0 12.0"
 
 # EKF Measurement Noise
-# LIDAR_NOISE_LIST="0.02 0.05 0.10"
-# ANGLE_NOISE_LIST="0.75 1.5 3.0"
+LIDAR_NOISE_LIST="0.05 0.10 0.20"
+ANGLE_NOISE_LIST="1.5 3.0 6.0"
 
 
 deg2rad_cfloat() { # convert degrees to a C float literal
@@ -85,10 +84,43 @@ awk_mean() {
     }'
 }
 
+# parse a rover_ground_truth_{run_id}.csv file
+compute_ekf_error_stats() {
+    local ground_truth_csv="$1"
+    if [ ! -f "$ground_truth_csv" ]; then
+        echo "DNF DNF DNF DNF"
+        return
+    fi
+    # -F',' sets the field separator to comma'
+    awk -F',' '
+        # skip first row
+        NR > 1 {
+            e_x = $8; e_y = $9; e_h = $10
+            pos_err = sqrt(e_x * e_x + e_y * e_y)
+            if (pos_err > peak_pos) peak_pos = pos_err
+            sum_sq_pos += e_x * e_x + e_y * e_y
+            abs_eh = (e_h < 0) ? -e_h : e_h
+            if (abs_eh > peak_heading) peak_heading = abs_eh
+            sum_sq_heading += e_h * e_h
+            n++
+        }
+        END {
+            if (n == 0) {
+                print "DNF DNF DNF DNF"
+                exit
+            }
+            rms_pos = sqrt(sum_sq_pos / n)
+            rms_heading = sqrt(sum_sq_heading / n)
+            rad2deg = 57.29577951308232
+            printf "%.6f %.6f %.6f %.6f\n", peak_pos, rms_pos, peak_heading*rad2deg, rms_heading*rad2deg
+        }
+    ' "$ground_truth_csv"
+}
+
 # CSV Headers
 
-echo "run_id,config_id,repeat,ANALYSIS_MODE,speed_noise,angular_noise_deg,lidar_noise,angle_noise_deg,mppi_lambda,mppi_samples,mppi_horizon,w_heading,w_speed,sigma_steer,odom_noise,completion_time_s" > "$RESULTS_CSV"
-echo "config_id,ANALYSIS_MODE,speed_noise,angular_noise_deg,lidar_noise,angle_noise_deg,mppi_lambda,mppi_samples,mppi_horizon,w_heading,w_speed,sigma_steer,odom_noise,repeats,dnf_count,mean_completion_time_s,std_completion_time_s" > "$SUMMARY_CSV"
+echo "run_id,config_id,repeat,ANALYSIS_MODE,speed_noise,angular_noise_deg,lidar_noise,angle_noise_deg,mppi_lambda,mppi_samples,mppi_horizon,w_heading,w_speed,sigma_steer,odom_noise,completion_time_s,peak_pos_err_m,rms_pos_err_m,peak_heading_err_deg,rms_heading_err_deg" > "$RESULTS_CSV"
+echo "config_id,ANALYSIS_MODE,speed_noise,angular_noise_deg,lidar_noise,angle_noise_deg,mppi_lambda,mppi_samples,mppi_horizon,w_heading,w_speed,sigma_steer,odom_noise,repeats,dnf_count,mean_completion_time_s,std_completion_time_s,mean_peak_pos_err_m,std_peak_pos_err_m,mean_rms_pos_err_m,std_rms_pos_err_m,mean_peak_heading_err_deg,std_peak_heading_err_deg,mean_rms_heading_err_deg,std_rms_heading_err_deg" > "$SUMMARY_CSV"
 
 mkdir -p "$LOG_BASE"
 
@@ -156,6 +188,10 @@ run_config() {
 
     local dnf_count=0
     local completion_times=""
+    local peak_pos_errs=""
+    local rms_pos_errs=""
+    local peak_heading_errs=""
+    local rms_heading_errs=""
 
     for repeat in $(seq 1 "$REPEATS"); do
         RUN_ID=$((RUN_ID + 1))
@@ -175,6 +211,7 @@ run_config() {
                 | sed 's/.*complete in //' \
                 | sed 's/s//')
         fi
+
         echo "  completion=${completion_time}s"
 
         # Move log files into LOGBASE
@@ -184,27 +221,53 @@ run_config() {
             [ -f "$src" ] && mv "$src" "$dst"
         done
 
+        # EKF pose error stats
+        local ground_truth_csv="${LOG_BASE}/rover_ground_truth_${run_id}.csv"
+        local error_stats
+        error_stats=$(compute_ekf_error_stats "$ground_truth_csv")
+        local peak_pos_err rms_pos_err peak_heading_err rms_heading_err
+        # read numbers into vars
+        read -r peak_pos_err rms_pos_err peak_heading_err rms_heading_err <<< "$error_stats"
+
+        echo "  peak_pos_err=${peak_pos_err}m  rms_pos_err=${rms_pos_err}m  peak_heading_err=${peak_heading_err}deg  rms_heading_err=${rms_heading_err}deg"
+
         if [ "$completion_time" = "DNF" ]; then
             dnf_count=$((dnf_count + 1))
-            echo "${run_id},${config_id},${repeat},${ANALYSIS_MODE},${speed_noise},${angular_noise_deg},${lidar_noise},${angle_noise_deg},${mppi_lambda},${mppi_samples},${mppi_horizon},${w_heading},${w_speed},${sigma_steer},${ODOM_NOISE},DNF" >> "$RESULTS_CSV"
-            continue
         fi
 
-        echo "${run_id},${config_id},${repeat},${ANALYSIS_MODE},${speed_noise},${angular_noise_deg},${lidar_noise},${angle_noise_deg},${mppi_lambda},${mppi_samples},${mppi_horizon},${w_heading},${w_speed},${sigma_steer},${ODOM_NOISE},${completion_time}" >> "$RESULTS_CSV"
+        echo "${run_id},${config_id},${repeat},${ANALYSIS_MODE},${speed_noise},${angular_noise_deg},${lidar_noise},${angle_noise_deg},${mppi_lambda},${mppi_samples},${mppi_horizon},${w_heading},${w_speed},${sigma_steer},${ODOM_NOISE},${completion_time},${peak_pos_err},${rms_pos_err},${peak_heading_err},${rms_heading_err}" >> "$RESULTS_CSV"
 
-        completion_times="${completion_times} ${completion_time}"
+        if [ "$completion_time" != "DNF" ]; then
+            completion_times="${completion_times} ${completion_time}"
+        fi
+        if [ "$peak_pos_err" != "DNF" ]; then
+            peak_pos_errs="${peak_pos_errs} ${peak_pos_err}"
+            rms_pos_errs="${rms_pos_errs} ${rms_pos_err}"
+            peak_heading_errs="${peak_heading_errs} ${peak_heading_err}"
+            rms_heading_errs="${rms_heading_errs} ${rms_heading_err}"
+        fi
     done
 
     # Summarise repeats
     local mean_t="DNF" std_t="DNF"
+    local mean_peak_pos="DNF" std_peak_pos="DNF"
+    local mean_rms_pos="DNF" std_rms_pos="DNF"
+    local mean_peak_heading="DNF" std_peak_heading="DNF"
+    local mean_rms_heading="DNF" std_rms_heading="DNF"
 
     if [ -n "${completion_times// /}" ]; then # check not all DNF
         read -r mean_t std_t < <(awk_meanstd "$completion_times")
     fi
+    if [ -n "${peak_pos_errs// /}" ]; then
+        read -r mean_peak_pos std_peak_pos < <(awk_meanstd "$peak_pos_errs")
+        read -r mean_rms_pos std_rms_pos < <(awk_meanstd "$rms_pos_errs")
+        read -r mean_peak_heading std_peak_heading < <(awk_meanstd "$peak_heading_errs")
+        read -r mean_rms_heading std_rms_heading < <(awk_meanstd "$rms_heading_errs")
+    fi
 
-    echo "${config_id},${ANALYSIS_MODE},${speed_noise},${angular_noise_deg},${lidar_noise},${angle_noise_deg},${mppi_lambda},${mppi_samples},${mppi_horizon},${w_heading},${w_speed},${sigma_steer},${ODOM_NOISE},${REPEATS},${dnf_count},${mean_t},${std_t}" >> "$SUMMARY_CSV"
+    echo "${config_id},${ANALYSIS_MODE},${speed_noise},${angular_noise_deg},${lidar_noise},${angle_noise_deg},${mppi_lambda},${mppi_samples},${mppi_horizon},${w_heading},${w_speed},${sigma_steer},${ODOM_NOISE},${REPEATS},${dnf_count},${mean_t},${std_t},${mean_peak_pos},${std_peak_pos},${mean_rms_pos},${std_rms_pos},${mean_peak_heading},${std_peak_heading},${mean_rms_heading},${std_rms_heading}" >> "$SUMMARY_CSV"
 
-    echo "[DONE] config=${config_id} mean_time=${mean_t}s std=${std_t}s dnf=${dnf_count}/${REPEATS}"
+    echo "[DONE] config=${config_id} mean_time=${mean_t}s std=${std_t}s dnf=${dnf_count}/${REPEATS}  mean_peak_pos_err=${mean_peak_pos}m  mean_rms_pos_err=${mean_rms_pos}m"
 }
 
 # Resolve parameter lists (fall back to fixed defaults)
