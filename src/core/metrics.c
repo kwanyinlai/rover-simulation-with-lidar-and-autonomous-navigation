@@ -74,7 +74,10 @@ void metrics_init(void) {
     pthread_mutex_lock(&rover_gt_lock);
     rover_ground_truth_log = fopen("logs/rover_ground_truth_" XSTR(METRICS_RUN_ID) ".csv", "w");
     setvbuf(rover_ground_truth_log, NULL, _IOFBF, METRICS_BUFSIZE);
-    fprintf(rover_ground_truth_log, "ts_microsecs,true_x,true_y,true_heading,est_x,est_y,est_heading,error_x,error_y,error_heading\n");
+    fprintf(rover_ground_truth_log,
+        "ts_microsecs,true_x,true_z,true_heading,"
+        "est_x,est_z,est_heading,error_x,error_z,error_heading,"
+        "odom_x,odom_z,odom_heading,odom_err_x,odom_err_z,odom_err_heading\n");
     pthread_mutex_unlock(&rover_gt_lock);
 
     metrics_initialized = 1;
@@ -224,13 +227,19 @@ void log_mppi_step(uint64_t step_id,
 
 
 void log_rover_ground_truth(uint64_t ts_microsecs,
-                                    const SensorState *true_state,
-                                    const SensorState *estimate_state) {
+                            const SensorState *true_state,
+                            const SensorState *estimate_state,
+                            const SensorState *odom_state) {
     float err_x = estimate_state->origin.x - true_state->origin.x;
-    float err_y = estimate_state->origin.z - true_state->origin.z;
+    float err_z = estimate_state->origin.z - true_state->origin.z;
     float err_h = wrap_angle(estimate_state->dir_angle - true_state->dir_angle);
+    float odom_err_x = odom_state->origin.x - true_state->origin.x;
+    float odom_err_z = odom_state->origin.z - true_state->origin.z;
+    float odom_err_h = wrap_angle(odom_state->dir_angle - true_state->dir_angle);
+
     pthread_mutex_lock(&rover_gt_lock);
-    fprintf(rover_ground_truth_log, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+    fprintf(rover_ground_truth_log,
+        "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
         ts_microsecs,
         true_state->origin.x,
         true_state->origin.z,
@@ -238,8 +247,15 @@ void log_rover_ground_truth(uint64_t ts_microsecs,
         estimate_state->origin.x,
         estimate_state->origin.z,
         estimate_state->dir_angle,
-        err_x, err_y, err_h
-    );
+        err_x,
+        err_z,
+        err_h,
+        odom_state->origin.x,
+        odom_state->origin.z,
+        odom_state->dir_angle,
+        odom_err_x,
+        odom_err_z,
+        odom_err_h);
     pthread_mutex_unlock(&rover_gt_lock);
 }
 

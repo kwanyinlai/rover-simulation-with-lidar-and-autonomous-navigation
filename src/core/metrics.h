@@ -114,7 +114,8 @@ void log_mppi_step(uint64_t step_id,
  *                error_x, error_y, error_heading where errors = estimator - ground-truth.
  */
 void log_rover_ground_truth(uint64_t timestamp_us,
-							const SensorState *true_state,
-							const SensorState *estimate_state);
+                            const SensorState *true_state,
+                            const SensorState *estimate_state,
+                            const SensorState *odom_state);
 
 #endif // METRICS_H
