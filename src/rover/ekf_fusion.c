@@ -179,9 +179,9 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, float dx, float dz, flo
     float d = sqrtf(dx_prev*dx_prev + dz_prev*dz_prev);
 
     // recompute R_t each step to match the noise model in update_odometry()
-    float trans_std = SPEED_NOISE * d;
-    float rot_std   = ANGULAR_NOISE * fabsf(delta_theta)
-                    + ANGULAR_NOISE * ANGULAR_NOISE_DIST_SCALE * d;
+    float trans_std = EKF_DEFAULT_SPEED_NOISE * d;
+    float rot_std   = EKF_DEFAULT_ANGULAR_NOISE * fabsf(delta_theta)
+                    + EKF_DEFAULT_ANGULAR_NOISE * ANGULAR_NOISE_DIST_SCALE * d;
     ekf->R_t[0][0] = trans_std * trans_std;
     ekf->R_t[1][1] = trans_std * trans_std;
     ekf->R_t[2][2] = rot_std * rot_std;
