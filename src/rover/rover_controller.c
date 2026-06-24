@@ -17,6 +17,8 @@
 #include "rover/ekf_fusion.h"
 #include "rover/rover_physics.h"
 #include "core/metrics.h"
+#include "core/noise_config.h"
+
 
 #include <math.h>
 #include <stdio.h>
@@ -63,15 +65,30 @@
 #define THROTTLE_MIN 0.0f
 #define THROTTLE_MAX 1.0f
 
-static inline float clamp_steer(float steer) {
-    return fmaxf(STEER_MIN, fminf(STEER_MAX, steer));
-}
+// basic proportional controller
+// enable by compiling with -DUSE_BASIC_CONTROLLER.
+// Pure P on heading error for steer, fixed throttle.
+// Stop-turn-go, rotate in place until aligned, then drive straight.
+// No steering while moving - eliminates oscillation on non-convex paths
 
-static inline float clamp_throttle(float throttle) {
-    return fmaxf(THROTTLE_MIN, fminf(THROTTLE_MAX, throttle));
-}
+#ifndef BASIC_ALIGN_THRESHOLD // how much alignment error is tolerated before turning in place
+#define BASIC_ALIGN_THRESHOLD 0.15f
+#endif
+#ifndef BASIC_TURN_THROTTLE // throttle while turning in place, 0.0 indicate stop while turning
+#define BASIC_TURN_THROTTLE 0.0f
+#endif
+#ifndef BASIC_TURN_STEER // full lock in-place rotation
+#define BASIC_TURN_STEER 1.0f
+#endif
+#ifndef BASIC_DRIVE_THROTTLE
+#define BASIC_DRIVE_THROTTLE 0.5f
+#endif
+#ifndef BASIC_DRIVE_STEER // no correction while driving
+#define BASIC_DRIVE_STEER 0.0f
+#endif
 
-// ====================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 SensorState rover_pose = {0};
 Path active_path = {0};
@@ -87,10 +104,15 @@ static const float REPLAN_SCAN_TURN_RAD = 4 * M_PI;
 static int rollout_cmd_write_fd = -1;
 static int rollout_result_read_fd = -1;
 static KalmanFilter ekf_pose;
-static SensorState odom_pose = {0};
-static SensorState prev_odom_pose = {0};
-static int rollout_has_collided[MPPI_SAMPLES];
 
+
+static SensorState odom_pose = {0};
+
+// prev_true_state: snapshot of ground truth (from get_sensor_state) at the
+// end of the previous tick
+static SensorState prev_true_state = {0};
+
+static int rollout_has_collided[MPPI_SAMPLES];
 
 typedef struct {
     PointCloud current;
@@ -128,49 +150,96 @@ static float ref_ekf_heading = 0.0f;
 static float ref_sensor_x = 0.0f;
 static float ref_sensor_z = 0.0f;
 
-static void *icp_worker_main(void *arg) {
-    ICPContext *context = (ICPContext *)arg;
-    while (1) {
-        pthread_mutex_lock(&context->mutex);
-        while (!context->job.is_working) {
-            pthread_cond_wait(&context->cond, &context->mutex);
+// fixed constants relative to MAX_WAYPOINTS, for sanity
+#define LOOK_BACK 2
+#define LOOK_AHEAD 6
+// Returns cross-track error, and outputs nearest path tangent angle and index of nearest line segment in path
+static float project_rover_to_path_segment(const Path *path,
+                                           float rover_x,
+                                           float rover_z,
+                                           int waypoint_hint,
+                                           float *dir_angle_out, 
+                                           int *nearest_line_seg_out) {
+    // waypoint hint to maintain path continuity
+    float best_sqr_dist = FLT_MAX;
+    float cross_track_error = 0.0f;
+    *dir_angle_out = 0.0f;
+    *nearest_line_seg_out = waypoint_hint;
+
+    int start_segment = waypoint_hint - LOOK_BACK > 0 ? waypoint_hint - LOOK_BACK : 0;
+    if (start_segment < active_path.current) start_segment = active_path.current;  // never regress
+    if (start_segment < 0) start_segment = 0;
+    int end_segment = waypoint_hint + LOOK_AHEAD >= path->count ? path->count - 1 : waypoint_hint + LOOK_AHEAD;
+
+    for (int i = start_segment; i < end_segment; i++) {
+        float wp1_x = path->waypoints[i].x;
+        float wp1_z = path->waypoints[i].z;
+        float wp2_x = path->waypoints[i + 1].x;
+        float wp2_z = path->waypoints[i + 1].z;
+
+        float dx = wp2_x - wp1_x;
+        float dz = wp2_z - wp1_z;
+        float len_sqr = dx * dx + dz * dz;
+
+        if (len_sqr < 1e-6f) {
+            continue;
         }
-        ICPJob job = context->job;
-        context->job.is_working = 0;
-        pthread_mutex_unlock(&context->mutex);
 
-        ICPResult result = run_icp(&job.current, &job.reference, ICP_WORKER_MAX_ITERS);
+        // project onto line segment
+        float t = ((rover_x - wp1_x) * dx + (rover_z - wp1_z) * dz) / len_sqr;
+        t = fmaxf(0.0f, fminf(1.0f, t));
 
-        point_cloud_free(&job.current);
-        point_cloud_free(&job.reference);
+        float proj_x = wp1_x + t * dx;
+        float proj_z = wp1_z + t * dz;
+        float x_offset = rover_x - proj_x;
+        float z_offset = rover_z - proj_z;
+        float error_sqr = x_offset * x_offset + z_offset * z_offset;
 
-        pthread_mutex_lock(&context->mutex);
-        context->result.result = result;
-        context->result.is_job_complete = 1;
-        pthread_mutex_unlock(&context->mutex);
+        if (error_sqr < best_sqr_dist) {
+            best_sqr_dist = error_sqr;
+            *nearest_line_seg_out = i;
+            *dir_angle_out = atan2f(dz, dx);
+
+            // cross product, -ve if rover is right of path, +ve if left
+            // magnitude = distance to path
+            float cross = dx * z_offset - dz * x_offset;
+            cross_track_error = (cross >= 0.0f ? 1.0f : -1.0f) * sqrtf(error_sqr);
+        }
     }
-    return NULL;
+    // after the loop, if no segment was found (e.g. on the final waypoint)
+    // project rover onto the line from previous waypoint to final waypoint
+    if (best_sqr_dist == FLT_MAX) {
+        const Waypoint *target = &path->waypoints[path->count - 1];
+        
+        if (path->count >= 2) {
+            const Waypoint *prev = &path->waypoints[path->count - 2];
+            float dx = target->x - prev->x;
+            float dz = target->z - prev->z;
+            float len_sqr = dx * dx + dz * dz;
+            if (len_sqr > 1e-6f) {
+                float t = ((rover_x - prev->x) * dx + (rover_z - prev->z) * dz) / len_sqr;
+                // don't clamp t here — rover may be past the endpoint
+                float proj_x = prev->x + t * dx;
+                float proj_z = prev->z + t * dz;
+                float x_offset = rover_x - proj_x;
+                float z_offset = rover_z - proj_z;
+                float cross = dx * z_offset - dz * x_offset;
+                float dist = sqrtf(x_offset * x_offset + z_offset * z_offset);
+                cross_track_error = (cross >= 0.0f ? 1.0f : -1.0f) * dist;
+            }
+        }
+        
+        float dx = target->x - rover_x;
+        float dz = target->z - rover_z;
+        float dist = sqrtf(dx * dx + dz * dz);
+        if (dist > 1e-4f) {
+            *dir_angle_out = atan2f(dz, dx);
+        }
+        *nearest_line_seg_out = path->count - 1;
+    }
+
+    return cross_track_error;
 }
-
-
-// nominal steer and throttle, warm started with previous frame's optimal
-static float nom_steer[MPPI_HORIZON];
-static float nom_throttle[MPPI_HORIZON];
-
-// gaussian noise per step per rollout
-static float steer_noise[MPPI_SAMPLES][MPPI_HORIZON];
-static float throttle_noise[MPPI_SAMPLES][MPPI_HORIZON];
-static float trajectory_cost[MPPI_SAMPLES];
-
-
-// rollout cost weights
-#define W_CROSS_TRACK 2.0f
-#define W_HEADING 12.0f
-#define W_STEER_RATE 0.1f
-#define W_SPEED 6.0f
-#define W_TERMINAL_CROSS_TRACK 1.5f
-#define W_TERMINAL_HEADING 2.0f
-#define W_COLLISION 50.0f
 
 // waypoints
 #define WAYPOINT_REACH_DIST 1.0f
@@ -222,63 +291,86 @@ static void advance_waypoint_to_farthest_reached(const Path *path,
     *wp_idx = next_target;
 }
 
-// fixed constants relative to MAX_WAYPOINTS, for sanity
-#define LOOK_BACK 2
-#define LOOK_AHEAD 6
-// Returns cross-track error, and outputs nearest path tangent angle and index of nearest line segment in path
-static float project_rover_to_path_segment(const Path *path,
-                                           float rover_x,
-                                           float rover_z,
-                                           int waypoint_hint,
-                                           float *dir_angle_out, 
-                                           int *nearest_line_seg_out) {
-    // waypoint hint to maintain path continuity
-    float best_sqr_dist = FLT_MAX;
-    float cross_track_error = 0.0f;
-    *dir_angle_out = 0.0f;
-    *nearest_line_seg_out = waypoint_hint;
-
-    int start_segment = waypoint_hint - LOOK_BACK > 0 ? waypoint_hint - LOOK_BACK : 0;
-    int end_segment = waypoint_hint + LOOK_AHEAD >= path->count ? path->count - 1 : waypoint_hint + LOOK_AHEAD;
-
-    for (int i = start_segment; i < end_segment; i++) {
-        float wp1_x = path->waypoints[i].x;
-        float wp1_z = path->waypoints[i].z;
-        float wp2_x = path->waypoints[i + 1].x;
-        float wp2_z = path->waypoints[i + 1].z;
-
-        float dx = wp2_x - wp1_x;
-        float dz = wp2_z - wp1_z;
-        float len_sqr = dx * dx + dz * dz;
-
-        if (len_sqr < 1e-6f) {
-            continue;
-        }
-
-        // project onto line segment
-        float t = ((rover_x - wp1_x) * dx + (rover_z - wp1_z) * dz) / len_sqr;
-        t = fmaxf(0.0f, fminf(1.0f, t));
-
-        float proj_x = wp1_x + t * dx;
-        float proj_z = wp1_z + t * dz;
-        float x_offset = rover_x - proj_x;
-        float z_offset = rover_z - proj_z;
-        float error_sqr = x_offset * x_offset + z_offset * z_offset;
-
-        if (error_sqr < best_sqr_dist) {
-            best_sqr_dist = error_sqr;
-            *nearest_line_seg_out = i;
-            *dir_angle_out = atan2f(dz, dx);
-
-            // cross product, -ve if rover is right of path, +ve if left
-            // magnitude = distance to path
-            float cross = dx * z_offset - dz * x_offset;
-            cross_track_error = (cross >= 0.0f ? 1.0f : -1.0f) * sqrtf(error_sqr);
-        }
-    }
-    return cross_track_error;
+static inline float clamp_steer(float steer) {
+    return fmaxf(STEER_MIN, fminf(STEER_MAX, steer));
 }
 
+static inline float clamp_throttle(float throttle) {
+    return fmaxf(THROTTLE_MIN, fminf(THROTTLE_MAX, throttle));
+}
+
+
+static void *icp_worker_main(void *arg) {
+    ICPContext *context = (ICPContext *)arg;
+    while (1) {
+        pthread_mutex_lock(&context->mutex);
+        while (!context->job.is_working) {
+            pthread_cond_wait(&context->cond, &context->mutex);
+        }
+        ICPJob job = context->job;
+        context->job.is_working = 0;
+        pthread_mutex_unlock(&context->mutex);
+
+        ICPResult result = run_icp(&job.current, &job.reference, ICP_WORKER_MAX_ITERS);
+
+        point_cloud_free(&job.current);
+        point_cloud_free(&job.reference);
+
+        pthread_mutex_lock(&context->mutex);
+        context->result.result = result;
+        context->result.is_job_complete = 1;
+        pthread_mutex_unlock(&context->mutex);
+    }
+    return NULL;
+}
+
+
+#ifdef USE_BASIC_CONTROLLER
+static void basic_update(float dt) {
+    (void) dt;
+
+    // aim directly at the current target waypoint
+    const Waypoint *target = &active_path.waypoints[active_path.current];
+    float dx = target->x - rover_pose.origin.x;
+    float dz = target->z - rover_pose.origin.z;
+    float bearing = atan2f(dz, dx);
+    float heading_error = wrap_angle(rover_pose.dir_angle - bearing);
+
+
+    if (fabsf(heading_error) > BASIC_ALIGN_THRESHOLD) {
+        float turn_dir = (heading_error < 0.0f) ? 1.0f : -1.0f;
+        float turn_steer = turn_dir * fminf(BASIC_TURN_STEER * fabsf(heading_error), 1.0f);
+        // damping term reads from odom_pose (noisy dead-reckoning)
+        turn_steer -= 0.8f * odom_pose.angular_speed;
+        turn_steer = clamp_steer(turn_steer);
+        set_steer(turn_steer);
+        set_throttle(BASIC_TURN_THROTTLE);
+    } else {
+        set_steer(0.0f);
+        set_throttle(BASIC_DRIVE_THROTTLE);
+    }
+}
+#endif // USE_BASIC_CONTROLLER
+
+
+// nominal steer and throttle, warm started with previous frame's optimal
+static float nom_steer[MPPI_HORIZON];
+static float nom_throttle[MPPI_HORIZON];
+
+// gaussian noise per step per rollout
+static float steer_noise[MPPI_SAMPLES][MPPI_HORIZON];
+static float throttle_noise[MPPI_SAMPLES][MPPI_HORIZON];
+static float trajectory_cost[MPPI_SAMPLES];
+
+
+// rollout cost weights
+#define W_CROSS_TRACK 2.0f
+#define W_HEADING 12.0f
+#define W_STEER_RATE 0.1f
+#define W_SPEED 6.0f
+#define W_TERMINAL_CROSS_TRACK 1.5f
+#define W_TERMINAL_HEADING 2.0f
+#define W_COLLISION 50.0f
 
 static void rollout_simulation(SimState *sim_state, float throttle, float steer, float dt) {
     step_rover_physics(&sim_state->x,
@@ -459,6 +551,7 @@ static int evaluate_rollouts_via_pipe(void)
         .x = rover_pose.origin.x,
         .z = rover_pose.origin.z,
         .dir_angle = rover_pose.dir_angle,
+        // same as rollout_cost(): noisy dead-reckoned velocity only.
         .speed = odom_pose.speed,
         .angular_speed = odom_pose.angular_speed,
         .wp_idx = active_path.current
@@ -587,7 +680,7 @@ void init_rover_controller(void) {
     rover_pose.speed = 0.0f;
     rover_pose.angular_speed = 0.0f;
     odom_pose = rover_pose;
-    prev_odom_pose = rover_pose;
+    prev_true_state = rover_pose;
     active_path.count = 0;
     active_path.current = 0;
     rover_mode = MODE_AUTO;
@@ -611,36 +704,67 @@ void update_odometry(float dt) {
     float throttle = get_throttle();
     float steer = get_steer();
 
-    float throttle_cmd = throttle;
-    float steer_cmd = steer;
+    // ground truth from get_sensor_state. we use this to scale true motion
+    // delta against noise model
+    const SensorState *true_state = get_sensor_state();
+
+    float true_dx = true_state->origin.x - prev_true_state.origin.x;
+    float true_dz = true_state->origin.z - prev_true_state.origin.z;
+    float true_dtheta = wrap_angle(true_state->dir_angle - prev_true_state.dir_angle);
+    float true_dist = sqrtf(true_dx * true_dx + true_dz * true_dz);
+
+    float reported_dx = true_dx;
+    float reported_dz = true_dz;
+    float reported_dtheta = true_dtheta;
+
     #ifndef DISABLE_ODOM_NOISE
-        if (throttle != 0.0f) {
-            throttle_cmd += gaussian_noise() * SPEED_NOISE;
+        if (true_dist > 1e-6f) {
+            float trans_noise_mag = gaussian_noise() * SPEED_NOISE * true_dist;
+            float heading = atan2f(true_dz, true_dx);
+            reported_dx += trans_noise_mag * cosf(heading);
+            reported_dz += trans_noise_mag * sinf(heading);
         }
-        if (steer != 0.0f) {
-            steer_cmd += gaussian_noise() * ANGULAR_NOISE;
-        }
+        reported_dtheta += gaussian_noise() * ANGULAR_NOISE * fabsf(true_dtheta);
+        reported_dtheta += gaussian_noise() * ANGULAR_NOISE * ANGULAR_NOISE_DIST_SCALE * true_dist;
     #endif
-    step_rover_physics(&odom_pose.origin.x,
-                       &odom_pose.origin.z,
-                       &odom_pose.dir_angle,
-                       &odom_pose.speed,
-                       &odom_pose.angular_speed,
-                       throttle_cmd,
-                       steer_cmd,
-                       dt,
-                       NULL,
-                       ROVER_COLLISION_RADIUS);
-    ekf_fusion_predict_from_odometry(&ekf_pose,
-                                     odom_pose.origin.x - prev_odom_pose.origin.x,
-                                     odom_pose.origin.z - prev_odom_pose.origin.z,
-                                     wrap_angle(odom_pose.dir_angle - prev_odom_pose.dir_angle));
+
+    // rover's actual onboard belief from odometry alone
+    odom_pose.origin.x += reported_dx;
+    odom_pose.origin.z += reported_dz;
+    odom_pose.dir_angle = wrap_angle(odom_pose.dir_angle + reported_dtheta);
+    odom_pose.speed = true_state->speed;
+    odom_pose.angular_speed = true_state->angular_speed;
+
+    prev_true_state = *true_state;
+
+    ekf_fusion_predict_from_odometry(&ekf_pose, reported_dx, reported_dz, reported_dtheta);
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 
-    prev_odom_pose = odom_pose;
-
-    const SensorState *true_state = get_sensor_state();
     log_rover_ground_truth(time_now_microsecs(), true_state, &rover_pose);
+    static float cumulative_odom_error = 0.0f;
+    static float cumulative_ekf_error  = 0.0f;
+    static int odom_tick = 0;
+    odom_tick++;
+
+    float odom_err = sqrtf(
+        (odom_pose.origin.x - true_state->origin.x) * (odom_pose.origin.x - true_state->origin.x) +
+        (odom_pose.origin.z - true_state->origin.z) * (odom_pose.origin.z - true_state->origin.z)
+    );
+    float ekf_err = sqrtf(
+        (rover_pose.origin.x - true_state->origin.x) * (rover_pose.origin.x - true_state->origin.x) +
+        (rover_pose.origin.z - true_state->origin.z) * (rover_pose.origin.z - true_state->origin.z)
+    );
+    cumulative_odom_error = fmaxf(cumulative_odom_error, odom_err);
+    cumulative_ekf_error = fmaxf(cumulative_ekf_error,  ekf_err);
+
+    if (odom_tick % 60 == 0) {
+        printf("[ODOM tick=%d] true_dist_this_tick=%.6f\n"
+            "  odom_err=%.4f  peak_odom_err=%.4f\n"
+            "  ekf_err=%.4f   peak_ekf_err=%.4f\n",
+            odom_tick, true_dist,
+            odom_err, cumulative_odom_error,
+            ekf_err,  cumulative_ekf_error);
+    }
 }
 
 void update_lidar_fusion(const PointCloud *current_scan,
@@ -662,22 +786,10 @@ void update_lidar_fusion(const PointCloud *current_scan,
         if (point_cloud_copy(&current_local, current_scan) &&
             point_cloud_copy(&reference_local, reference_scan))
         {
-            // shift to local frame
-            for (int i = 0; i < current_local.size; i++) {
-                current_local.data[i].position.x -= ref_sensor_x;
-                current_local.data[i].position.z -= ref_sensor_z;
-            }
-            for (int i = 0; i < reference_local.size; i++) {
-                reference_local.data[i].position.x -= ref_sensor_x;
-                reference_local.data[i].position.z -= ref_sensor_z;
-            }
-
-            ref_ekf_x = ekf_pose.state.origin.x;
-            ref_ekf_z = ekf_pose.state.origin.z;
-            ref_ekf_heading = ekf_pose.state.dir_angle;
-            ref_sensor_x = sensor_pos.x;
-            ref_sensor_z = sensor_pos.z;
-
+            const SensorState *ekf_state = ekf_fusion_get_state(&ekf_pose);
+            ref_ekf_x       = ekf_state->origin.x;
+            ref_ekf_z       = ekf_state->origin.z;
+            ref_ekf_heading = ekf_state->dir_angle;
             pthread_mutex_lock(&icp_res.mutex);
             icp_res.job.current   = current_local;
             icp_res.job.reference = reference_local;
@@ -700,19 +812,26 @@ void update_lidar_fusion(const PointCloud *current_scan,
         is_job_complete = 1;
     }
     pthread_mutex_unlock(&icp_res.mutex);
-
+    fprintf(stderr, "[ICP tick] complete=%d converged=%d error=%.4f "
+        "dx=%.4f dz=%.4f dtheta=%.4fdeg "
+        "anchor=(%.3f,%.3f,%.3fdeg)\n",
+        is_job_complete, icp.converged, icp.error,
+        icp.dx, icp.dz, icp.delta_theta * 180.0f / (float)M_PI,
+        ref_ekf_x, ref_ekf_z, ref_ekf_heading * 180.0f / (float)M_PI);
+    #ifndef DISABLE_ICP_CORRECTION
     if (is_job_complete && icp.converged) {
         ekf_fusion_correct_from_icp(&ekf_pose, &icp,
                                     ref_ekf_x,
                                     ref_ekf_z,
                                     ref_ekf_heading);
     }
+    #endif
 
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 }
 
 void update_path_follower(float dt) {
-    (void) dt; // dt is currently unused but might be needed in the future
+    // (void) dt; // dt is currently unused but might be needed in the future
     if (active_path.current >= active_path.count) {
         // wait for one full lidar revolution before requesting a new plan.
         if (!awaiting_replan_scan) {
@@ -769,6 +888,7 @@ void update_path_follower(float dt) {
         }
     }
 
+
     if (active_path.current >= active_path.count) {
         set_throttle(0.0f);
         set_steer(0.0f);
@@ -776,18 +896,23 @@ void update_path_follower(float dt) {
     }
 
     awaiting_replan_scan = 0;
+    #ifdef USE_BASIC_CONTROLLER
+        basic_update(dt);
+    #else
+        mppi_update();
 
-    mppi_update();
+        float steer = nom_steer[0];
+        float throttle = nom_throttle[0];
 
-    float steer = nom_steer[0];
-    float throttle = nom_throttle[0];
-
-    set_steer(steer);
-    set_throttle(throttle);
+        set_steer(steer);
+        set_throttle(throttle);
+        if (nom_throttle[0] > 0.1f) {
+            advance_mppi();
+        }
+        
+    #endif
     // only advance sequence if we are non-stationary
-    if (nom_throttle[0] > 0.1f) {
-        advance_mppi();
-    }
+
 }
 
 void set_waypoints(Waypoint *points, int count)

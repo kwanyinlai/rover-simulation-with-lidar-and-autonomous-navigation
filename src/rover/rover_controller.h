@@ -3,9 +3,7 @@
 
 #define ROVER_HEIGHT_CELLS 3
 
-// odometry noise
-#define SPEED_NOISE 0.06f
-#define ANGULAR_NOISE 0.035f
+
 
 
 #include "rendering/scene.h"
