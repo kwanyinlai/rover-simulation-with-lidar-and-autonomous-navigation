@@ -6,6 +6,7 @@
 #include "core/noise.h"
 #include "core/io_utils.h"
 #include "rover/rover_controller.h"
+#include "core/noise_config.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -14,7 +15,7 @@
 #include <unistd.h>
 
 void run_worker_loop(int read_fd, int write_fd, TriangleArray *scene) {
-    const float noise_factor = 0.01f;
+    const float noise_factor = LIDAR_RANGE_NOISE_FACTOR;
     RayResultBatch ray_result_batch;
     RayBatch ray_batch;
     while (1) {
