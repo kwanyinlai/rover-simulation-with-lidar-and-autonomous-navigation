@@ -43,7 +43,8 @@ static float g_elapsed_seconds = 0.0f;
 typedef enum {
     FREE_MODE,
     EKF_MODE,
-    MPPI_MODE 
+    MPPI_MODE,
+    SCRIPT_MODE
 } SweepMode;
 
 static SweepMode analysis_mode = FREE_MODE;
@@ -180,10 +181,6 @@ void create_workers(void){
     int rover_pose_pipe[2];
     int rollout_cmd_pipe[2];
     int rollout_result_pipe[2];
-    /*
-    int scan_match_cmd_pipe[2];
-    int scan_match_result_pipe[2];
-    */
     
 
     if (pipe(rover_pose_pipe) < 0) { 
@@ -218,16 +215,6 @@ void create_workers(void){
         perror("pipe rollout_result"); 
         exit(1);
     }
-    /*
-    if (pipe(scan_match_cmd_pipe) < 0) {
-        perror("pipe scan_match_cmd");
-        exit(1);
-    }
-    if (pipe(scan_match_result_pipe) < 0) {
-        perror("pipe scan_match_result");
-        exit(1);
-    }
-    */
 
 
     scan_coord_pid = fork();
@@ -236,15 +223,10 @@ void create_workers(void){
         exit(1);
     }
     else if (scan_coord_pid == 0) {
-        // scan coordinator
-
         signal(SIGTERM, coordinator_sigterm);
 
-        // receive scan commands from main process
-        close(scan_cmd_pipe[1]); // close write end of scan cmd 
-        // coordinator will write point batches to occupancy updater
-        close(point_batch_pipe[0]); // close read end
-        // unused updated voxel pipes for occupancy manager
+        close(scan_cmd_pipe[1]);
+        close(point_batch_pipe[0]);
         close(updated_voxels_pipe[0]); 
         close(updated_voxels_pipe[1]);  
         close(frontier_waypoints_pipe[0]);
@@ -255,11 +237,6 @@ void create_workers(void){
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
-        
-        /*
-        close(scan_match_cmd_pipe[1]);
-        close(scan_match_result_pipe[0]);
-        */
 
         int ray_task_pipe[NUM_WORKERS][2];
         int ray_results_pipe[NUM_WORKERS][2];
@@ -285,46 +262,30 @@ void create_workers(void){
             }
             if (wpid == 0) {
                 signal(SIGTERM, sigterm_handler);
-                // additionally close scan_cmd read
                 close(scan_cmd_pipe[0]);
-                // additionally close write end of ray batch results
                 close(point_batch_pipe[1]);
-                // additionally close read end of ray batch results
                 close(ray_batch_results_pipe[0]);
-                // close scan match pipes
-                /*
-                close(scan_match_cmd_pipe[0]);
-                close(scan_match_result_pipe[1]);
-                */
-                // worker process
                 for (int j = 0; j < NUM_WORKERS; j++) {
                     if (j != i) {
-                        // close all pipes not related to this worker
                         close(ray_task_pipe[j][0]);
                         close(ray_task_pipe[j][1]);
                         close(ray_results_pipe[j][0]);
                         close(ray_results_pipe[j][1]);
                     }
                     else{
-                        // keep pipes related to this worker, but close the ends not used by this worker
-                        close(ray_task_pipe[j][1]); // close write end
-                        close(ray_results_pipe[j][0]); // close read end
+                        close(ray_task_pipe[j][1]);
+                        close(ray_results_pipe[j][0]);
                     }
                 }
                 run_worker_loop(ray_task_pipe[i][0], ray_results_pipe[i][1], &scene);
                 exit(0);
             } else {
-                // record worker_pids for cleanup
                 worker_pids[i] = wpid;
             }
         }
 
         run_coordinator_loop(scan_cmd_pipe[0],
                              ray_batch_results_pipe[1], 
-                             /*
-                             scan_match_cmd_pipe[0], 
-                             scan_match_result_pipe[1],
-                             */
                              ray_task_pipe, 
                              ray_results_pipe, 
                              point_batch_pipe[1]
@@ -338,27 +299,19 @@ void create_workers(void){
         exit(1);
     }
     else if (updater_pid == 0) {
-        // occupancy updater
-        close(scan_cmd_pipe[0]); // close read end
-        close(point_batch_pipe[1]); // close write end
-        close(updated_voxels_pipe[0]); // close read end
-        close(frontier_waypoints_pipe[0]); // close read end
-        close(frontier_waypoints_pipe[1]); // close write end
-        close(rover_pose_pipe[0]); // close read end
-        close(rover_pose_pipe[1]); // close write end
+        close(scan_cmd_pipe[0]);
+        close(point_batch_pipe[1]);
+        close(updated_voxels_pipe[0]);
+        close(frontier_waypoints_pipe[0]);
+        close(frontier_waypoints_pipe[1]);
+        close(rover_pose_pipe[0]);
+        close(rover_pose_pipe[1]);
         close(rollout_cmd_pipe[0]);
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
-        /*
-        close(scan_match_cmd_pipe[0]);
-        close(scan_match_cmd_pipe[1]);
-        close(scan_match_result_pipe[0]);
-        close(scan_match_result_pipe[1]);
-        */
         run_occupancy_updater_loop(point_batch_pipe[0], updated_voxels_pipe[1], &occupancy_grid_3d);
         exit(0);
-        // run occupancy updater loop
     }
 
     int frontier_pid = fork();
@@ -367,25 +320,18 @@ void create_workers(void){
         exit(1);
     }
     else if (frontier_pid == 0) {
-        // frontier analyzer
-        close(scan_cmd_pipe[0]); // close read end
-        close(scan_cmd_pipe[1]); // close write end
-        close(point_batch_pipe[0]); // close read end
-        close(point_batch_pipe[1]); // close write end
-        close(ray_batch_results_pipe[0]); // close read end
-        close(ray_batch_results_pipe[1]); // close write end
-        close(updated_voxels_pipe[1]); // close write end
-        close(rover_pose_pipe[1]); // close write end
+        close(scan_cmd_pipe[0]);
+        close(scan_cmd_pipe[1]);
+        close(point_batch_pipe[0]);
+        close(point_batch_pipe[1]);
+        close(ray_batch_results_pipe[0]);
+        close(ray_batch_results_pipe[1]);
+        close(updated_voxels_pipe[1]);
+        close(rover_pose_pipe[1]);
         close(rollout_cmd_pipe[0]);
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
         close(rollout_result_pipe[1]);
-        /*
-        close(scan_match_cmd_pipe[0]);
-        close(scan_match_cmd_pipe[1]);
-        close(scan_match_result_pipe[0]);
-        close(scan_match_result_pipe[1]);
-        */
         run_frontier_analyzer_loop(updated_voxels_pipe[0], frontier_waypoints_pipe[1], rover_pose_pipe[0], &occupancy_grid_3d, &occupancy_grid_2d);
         exit(0);
     }
@@ -412,16 +358,9 @@ void create_workers(void){
         close(rover_pose_pipe[1]);
         close(rollout_cmd_pipe[1]);
         close(rollout_result_pipe[0]);
-        /*
-        close(scan_match_cmd_pipe[0]);
-        close(scan_match_cmd_pipe[1]);
-        close(scan_match_result_pipe[0]);
-        close(scan_match_result_pipe[1]);
-        */
 
         int rollout_task_pipes[NUM_WORKERS][2];
         int rollout_costs_pipes[NUM_WORKERS][2];
-        // deal with pipes separately so we can exit on error cleanly
         for (int i = 0; i < NUM_WORKERS; i++) {
             if (pipe(rollout_task_pipes[i]) < 0) {
                 perror("pipe rollout_task");
@@ -436,7 +375,6 @@ void create_workers(void){
             int wpid = fork();
             if (wpid < 0) {
                 perror("fork rollout_worker");
-                // kill any workers already spawned
                 for (int j = 0; j < i; j++) {
                     kill(rollout_workers_pid[j], SIGTERM);
                     waitpid(rollout_workers_pid[j], NULL, 0);
@@ -479,7 +417,6 @@ void create_workers(void){
     close(scan_cmd_pipe[0]);
     close(point_batch_pipe[0]);
     close(point_batch_pipe[1]);
-    // keep ray_batch read end open to read and render point clouds
     close(ray_batch_results_pipe[1]);
     close(frontier_waypoints_pipe[1]);
     close(updated_voxels_pipe[0]);
@@ -487,13 +424,6 @@ void create_workers(void){
     close(rover_pose_pipe[0]);
     close(rollout_cmd_pipe[0]);
     close(rollout_result_pipe[1]);
-
-    /*
-    close(scan_match_cmd_pipe[0]);
-    close(scan_match_result_pipe[1]);
-    set_scan_match_pipe_fds(scan_match_cmd_pipe[1], scan_match_result_pipe[0]);
-    */
-    // updated_voxels_pipe_rd = updated_voxels_pipe[0]; // store read end for main loop to read updated voxels from occupancy updater
 
     set_scan_pipe_fds(scan_cmd_pipe[1], ray_batch_results_pipe[0]);
     frontier_waypoints_read_fd = frontier_waypoints_pipe[0];
@@ -533,6 +463,48 @@ static void load_preset_waypoints(void) {
     }
     else if (analysis_mode == MPPI_MODE) {
         set_waypoints(MPPI_WAYPOINTS, MPPI_WAYPOINT_COUNT);
+    }
+}
+
+// deterministic motion that exercises straight driving, gentle curves,
+// and tight turns without depending on path-following correctness.
+typedef struct { float throttle; float steer; float duration; } ControlStep;
+static const ControlStep SCRIPT_STEPS[] = {
+    { 0.5f,  0.0f,  4.0f },
+    { 0.5f,  0.6f,  3.0f },
+    { 0.5f,  0.0f,  3.0f },
+    { 0.5f, -0.6f,  3.0f },
+    { 0.3f,  0.0f,  2.0f },
+    { 0.5f,  0.8f,  2.0f },
+    { 0.5f,  0.0f,  4.0f },
+    { 0.5f, -0.8f,  2.0f },
+    { 0.5f,  0.0f,  3.0f },
+};
+static const int SCRIPT_STEP_COUNT =
+    (int)(sizeof(SCRIPT_STEPS) / sizeof(SCRIPT_STEPS[0]));
+
+static void update_script_controller(float current_time) {
+    static float script_start_time = -1.0f;
+    if (script_start_time < 0.0f) script_start_time = current_time;
+
+    float t = current_time - script_start_time;
+    float cursor = 0.0f;
+    for (int i = 0; i < SCRIPT_STEP_COUNT; i++) {
+        cursor += SCRIPT_STEPS[i].duration;
+        if (t < cursor) {
+            set_throttle(SCRIPT_STEPS[i].throttle);
+            set_steer(SCRIPT_STEPS[i].steer);
+            return;
+        }
+    }
+
+    if (!is_run_complete) {
+        is_run_complete = 1;
+        float elapsed = current_time - script_start_time;
+        metrics_close();
+        if (scan_coord_pid > 0) kill(scan_coord_pid, SIGTERM);
+        if (rollout_coord_pid > 0) kill(rollout_coord_pid, SIGTERM);
+        exit(0);
     }
 }
 
@@ -577,10 +549,14 @@ void display() {
     // MOVE ROVER
     if (!is_paused) {
         if (rover_mode == MODE_AUTO) {
-            update_path_follower(delta_time);
+            if (analysis_mode == SCRIPT_MODE) {
+                update_script_controller(current_time);
+            } else {
+                update_path_follower(delta_time);
+            }
         }
         // while testing hyperparameters, exit once the preset path is fully consumed.
-        if (analysis_mode != FREE_MODE) {
+        if (analysis_mode != FREE_MODE && analysis_mode != SCRIPT_MODE) {
             check_run_complete(current_time);
         }
 
@@ -618,7 +594,6 @@ void display() {
                 float kf_dz = rover_pose.origin.z - keyframe_z;
                 float dist_from_keyframe = sqrtf(kf_dx*kf_dx + kf_dz*kf_dz);
 
-                // only correct if we've moved enough from prev keyframe
                 if (dist_from_keyframe > 0.3f) {
                     update_lidar_fusion(latest_scan, &keyframe_scan);
                 }
@@ -688,6 +663,9 @@ int main(int argc, char** argv) {
             else if (strcmp(argv[i], "mppi") == 0) {
                 analysis_mode = MPPI_MODE;
             }
+            else if (strcmp(argv[i], "script") == 0) {
+                analysis_mode = SCRIPT_MODE;
+            }
         }
     }
 
@@ -703,10 +681,11 @@ int main(int argc, char** argv) {
     init_point_cloud(&cloud);
     triangle_array_init(&scene);
 
-    // empty scene so CTE isn't disrupted by obstacles; obstacles uneeded
-    // for localisation because noise turned off
     if (analysis_mode == MPPI_MODE) {
         build_scene_empty(&scene);
+    }
+    else if (analysis_mode == SCRIPT_MODE) {
+        build_scene_ekf_script(&scene);
     }
     else {
         build_scene(&scene);
@@ -714,12 +693,13 @@ int main(int argc, char** argv) {
 
     init_occupancy_map(&occupancy_grid_3d, 300, 60, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
     init_occupancy_map(&occupancy_grid_2d, 300, 1, 240, 0.1f, (Vector3){-15.0f, 0.0f, -12.0f});
-    // x from -15 to 15, y from 0 to 6, z from -12 to 12, with 0.1m resolution, gives us a 300x60x240 grid
 
     create_workers();
 
     if (analysis_mode != FREE_MODE) {
-        load_preset_waypoints();
+        if (analysis_mode != SCRIPT_MODE) {
+            load_preset_waypoints();
+        }
         rover_mode = MODE_AUTO;
     }
 
@@ -732,7 +712,6 @@ int main(int argc, char** argv) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // display, reshape, keyboard, mouse-pressed and mouse-move callbacks
     glutDisplayFunc(display); 
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
@@ -746,5 +725,3 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
-
-
