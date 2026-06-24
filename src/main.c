@@ -56,6 +56,8 @@ extern int toggle_occupancy_map_2d;
 extern int toggle_occupancy_map_3d;
 extern int toggle_point_cloud;
 extern RoverMode rover_mode;
+extern SensorState rover_pose;
+
 
 
 #include <signal.h>
@@ -500,18 +502,16 @@ void create_workers(void){
     
 }
 
-// TODO: EKF waypoints need to be adjusted, too complex
 static const Waypoint EKF_WAYPOINTS[] = {
-    { 12.0f,  -8.0f },
-    { 12.0f,   0.0f },
-    {  8.0f,   8.0f },
-    {  0.0f,   9.0f },
-    { -6.0f,   5.0f },
-    {-12.0f,   8.0f },
-    {-12.0f,   0.0f },
-    { -8.0f,  -8.0f },
-    { -2.0f,  -9.0f },
-    {  0.0f,  -4.0f },
+    { 10.0f,  -9.0f },
+    { 10.0f,   9.0f },
+    {  3.0f,   9.0f },
+    {  3.0f,   6.0f },
+    {  3.0f,   9.0f },
+    {-10.0f,   9.0f },
+    {-10.0f,  -9.0f },
+    {  0.0f,  -9.0f },
+    { 10.0f,  -9.0f },
 };
 static const int EKF_WAYPOINT_COUNT =
     (int)(sizeof(EKF_WAYPOINTS) / sizeof(EKF_WAYPOINTS[0]));
@@ -550,6 +550,7 @@ static void check_run_complete(float current_time) {
         exit(0);
     }
 }
+
 
 void display() {
     float current_time = glutGet(GLUT_ELAPSED_TIME) / 1000.0f; 
@@ -591,17 +592,49 @@ void display() {
         }
     }
 
-    // CHECK AVAILABLE SCAN AND CORRECT
+    // CHECK AVAILABLE SCAN AND CORRECT, USE KEYFRAMES
     const PointCloud *latest_scan;
     const PointCloud *previous_scan;
     static int scan_pair_counter = 0;
+    static PointCloud keyframe_scan = {0};
+    static int keyframe_valid = 0;
+    static float keyframe_x = 0.0f;
+    static float keyframe_z = 0.0f;
+
+    #define KEYFRAME_DIST_THRESHOLD 2.5f
+
     if (poll_scan_pair(&scan_state, &latest_scan, &previous_scan)) {
         scan_pair_counter++;
         if (scan_pair_counter % ICP_REVOLUTIONS_PER_UPDATE == 0) {
-            update_lidar_fusion(latest_scan, previous_scan);
+            if (!keyframe_valid) {
+                point_cloud_copy(&keyframe_scan, latest_scan);
+                keyframe_x = rover_pose.origin.x;
+                keyframe_z = rover_pose.origin.z;
+                keyframe_valid = 1;
+                fprintf(stderr, "[KEYFRAME] initialized at (%.3f, %.3f)\n",
+                        keyframe_x, keyframe_z);
+            } else {
+                float kf_dx = rover_pose.origin.x - keyframe_x;
+                float kf_dz = rover_pose.origin.z - keyframe_z;
+                float dist_from_keyframe = sqrtf(kf_dx*kf_dx + kf_dz*kf_dz);
+
+                // only correct if we've moved enough from prev keyframe
+                if (dist_from_keyframe > 0.3f) {
+                    update_lidar_fusion(latest_scan, &keyframe_scan);
+                }
+
+                float dx = rover_pose.origin.x - keyframe_x;
+                float dz = rover_pose.origin.z - keyframe_z;
+                if (dx * dx + dz * dz > KEYFRAME_DIST_THRESHOLD * KEYFRAME_DIST_THRESHOLD) {
+                    point_cloud_copy(&keyframe_scan, latest_scan);
+                    keyframe_x = rover_pose.origin.x;
+                    keyframe_z = rover_pose.origin.z;
+                    fprintf(stderr, "[KEYFRAME] updated at (%.3f, %.3f)\n",
+                            keyframe_x, keyframe_z);
+                }
+            }
         }
     }
-
     // RENDER VISUAL ELEMENTS
     if (is_render_scene) render_wire();
 
