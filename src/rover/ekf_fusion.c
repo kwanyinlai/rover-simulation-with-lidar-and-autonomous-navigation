@@ -6,21 +6,22 @@
 #include "lidar/sensor_control.h"
 #include "localization/scan_matcher.h"
 #include "core/metrics.h"
+#include "core/noise_config.h"
 
 #include <math.h>
 #include <string.h>
 
 #ifndef EKF_DEFAULT_SPEED_NOISE
-#define EKF_DEFAULT_SPEED_NOISE 0.15f
+#define EKF_DEFAULT_SPEED_NOISE SPEED_NOISE
 #endif
 #ifndef EKF_DEFAULT_ANGULAR_NOISE
-#define EKF_DEFAULT_ANGULAR_NOISE (4.0f * MATH_DEG_TO_RAD)
+#define EKF_DEFAULT_ANGULAR_NOISE ANGULAR_NOISE
 #endif
 #ifndef EKF_DEFAULT_LIDAR_NOISE
-#define EKF_DEFAULT_LIDAR_NOISE 0.15f
+#define EKF_DEFAULT_LIDAR_NOISE 0.5f
 #endif
 #ifndef EKF_DEFAULT_ANGLE_NOISE
-#define EKF_DEFAULT_ANGLE_NOISE (4.0f * MATH_DEG_TO_RAD)
+#define EKF_DEFAULT_ANGLE_NOISE (15.0f * MATH_DEG_TO_RAD)
 #endif
 #define ICP_CORRECTION_MAX_ITERS 100
 
@@ -177,6 +178,16 @@ void ekf_fusion_predict_from_odometry(KalmanFilter *ekf, float dx, float dz, flo
 
     float d = sqrtf(dx_prev*dx_prev + dz_prev*dz_prev);
 
+    // recompute R_t each step to match the noise model in update_odometry()
+    float trans_std = SPEED_NOISE * d;
+    float rot_std   = ANGULAR_NOISE * fabsf(delta_theta)
+                    + ANGULAR_NOISE * ANGULAR_NOISE_DIST_SCALE * d;
+    ekf->R_t[0][0] = trans_std * trans_std;
+    ekf->R_t[1][1] = trans_std * trans_std;
+    ekf->R_t[2][2] = rot_std * rot_std;
+
+
+
     // Jacobian of G_t at the current state 
     float G_t[EKF_STATE_DIM][EKF_STATE_DIM] =  {
         {1, 0, -d * sinf(theta_prev)},
@@ -281,12 +292,23 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf,
     if (!ekf || !icp) {
         return;
     }
-    if (!icp->converged || icp->error > 0.5f) {
+    if (!icp->converged || icp->error > 0.15f) {
         return;
     }
 
     uint64_t update_id = next_ekf_update_id();
     uint64_t ts = time_now_microsecs();
+
+    float icp_dist = sqrtf(icp->dx * icp->dx + icp->dz * icp->dz);
+    if (icp_dist > 0.5f || fabsf(icp->delta_theta) > 1.0f) {
+        return;
+    }
+
+    float icp_quality = 1.0f + 20.0f * icp->error;
+    ekf->Q_t[0][0] = (EKF_DEFAULT_LIDAR_NOISE * icp_quality) * (EKF_DEFAULT_LIDAR_NOISE * icp_quality);
+    ekf->Q_t[1][1] = ekf->Q_t[0][0];
+    ekf->Q_t[2][2] = (EKF_DEFAULT_ANGLE_NOISE) * (EKF_DEFAULT_ANGLE_NOISE);
+
 
     // line 4: K_t = Σ̄_t * H_t^T * (H_t * Σ̄_t * H_t^T + Q_t)^{-1}
     //             = Σ̄_t * (Σ̄_t + Q_t)^{-1}   since H_t = I
@@ -366,6 +388,15 @@ void ekf_fusion_correct_from_icp(KalmanFilter *ekf,
                     true_state->origin.x,
                     true_state->origin.z,
                     true_state->dir_angle);
+    
+    fprintf(stderr, "[EKF_GAIN] K_diag=(%.4f, %.4f, %.4f)  "
+        "Sigma_diag=(%.6f, %.6f, %.6f)  "
+        "Q_diag=(%.6f, %.6f, %.6f)  "
+        "innov=(%.4f, %.4f, %.4fdeg)\n",
+        K_t[0][0], K_t[1][1], K_t[2][2],
+        ekf->Sigma[0][0], ekf->Sigma[1][1], ekf->Sigma[2][2],
+        ekf->Q_t[0][0],   ekf->Q_t[1][1],   ekf->Q_t[2][2],
+        innov[0], innov[1], innov[2] * 180.0f / (float)M_PI);
 }
 
 const SensorState *ekf_fusion_get_state(const KalmanFilter *ekf) {
