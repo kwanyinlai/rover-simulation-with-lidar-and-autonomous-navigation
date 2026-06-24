@@ -740,7 +740,7 @@ void update_odometry(float dt) {
     ekf_fusion_predict_from_odometry(&ekf_pose, reported_dx, reported_dz, reported_dtheta);
     rover_pose = *ekf_fusion_get_state(&ekf_pose);
 
-    log_rover_ground_truth(time_now_microsecs(), true_state, &rover_pose);
+    log_rover_ground_truth(time_now_microsecs(), true_state, &rover_pose, &odom_pose);
     static float cumulative_odom_error = 0.0f;
     static float cumulative_ekf_error  = 0.0f;
     static int odom_tick = 0;

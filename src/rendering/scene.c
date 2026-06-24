@@ -127,11 +127,18 @@ void build_floor(TriangleArray *scene){
     );
 }
 
-
-
-
-
-
+// Floor sized for build_scene_ekf_script's 40m x 30m room
+static void build_floor_ekf_script(TriangleArray *scene) {
+    int div_floor = 24;
+    mesh_add_quad_tesselated(
+        scene,
+        (Vector3){-10.f, 0.f, -15.f},
+        (Vector3){ 30.f, 0.f, -15.f},
+        (Vector3){ 30.f, 0.f,  15.f},
+        (Vector3){-10.f, 0.f,  15.f},
+        div_floor
+    );
+}
 
 // ======================================
 
@@ -221,4 +228,58 @@ void build_scene_empty(TriangleArray *scene) {
         (Vector3){ 15.f, 6.f,  12.f},
         (Vector3){-15.f, 6.f,  12.f},
         div_walls);
+}
+
+
+// Obstacles: 6 boxes, sparse to minimise collision, but placed to provide
+// visual interest for ICP
+void build_scene_ekf_script(TriangleArray *scene) {
+    int div_walls = 8;
+
+    build_floor_ekf_script(scene);
+
+    // Back wall (z = -15)
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-10.f, 0.f, -15.f},
+        (Vector3){ 30.f, 0.f, -15.f},
+        (Vector3){ 30.f, 6.f, -15.f},
+        (Vector3){-10.f, 6.f, -15.f},
+        div_walls
+    );
+
+    // Left wall (x = -10)
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-10.f, 0.f,  15.f},
+        (Vector3){-10.f, 0.f, -15.f},
+        (Vector3){-10.f, 6.f, -15.f},
+        (Vector3){-10.f, 6.f,  15.f},
+        div_walls
+    );
+
+    // Right wall (x = 30)
+    mesh_add_quad_tesselated(scene,
+        (Vector3){30.f, 0.f, -15.f},
+        (Vector3){30.f, 0.f,  15.f},
+        (Vector3){30.f, 6.f,  15.f},
+        (Vector3){30.f, 6.f, -15.f},
+        div_walls
+    );
+
+    // Front wall (z = 15)
+    mesh_add_quad_tesselated(scene,
+        (Vector3){-10.f, 0.f, 15.f},
+        (Vector3){ 30.f, 0.f, 15.f},
+        (Vector3){ 30.f, 6.f, 15.f},
+        (Vector3){-10.f, 6.f, 15.f},
+        div_walls
+    );
+
+    mesh_add_box(scene,  2.5f, 0.0f,  6.5f, 1.0f, 1.2f, 1.0f); // box0
+    mesh_add_box(scene,  9.0f, 0.0f, -9.0f, 1.0f, 1.2f, 1.0f); // box1
+    mesh_add_box(scene, 17.0f, 0.0f,  7.5f, 1.0f, 1.2f, 1.0f); // box2
+    mesh_add_box(scene, -3.5f, 0.0f, -5.0f, 1.0f, 1.2f, 1.0f); // box3
+    mesh_add_box(scene, 22.0f, 0.0f, -1.0f, 1.0f, 1.2f, 1.0f); // box4
+    mesh_add_box(scene,  5.0f, 0.0f, -9.0f, 1.0f, 1.2f, 1.0f); // box5
+
+    printf("%zu triangles\n", scene->size);
 }

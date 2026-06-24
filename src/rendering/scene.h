@@ -79,4 +79,7 @@ void build_scene(TriangleArray *scene);
  */
 void build_scene_empty(TriangleArray *scene);
 
+void build_scene_ekf_script(TriangleArray *scene);
+
+
 #endif // SCENE_H
